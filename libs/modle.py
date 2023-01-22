@@ -72,9 +72,9 @@ class en_cov(nn.Module):
     def __init__(self):
         super().__init__()
 
-        self.cov1d = nn.Conv1d(1, 2, kernel_size=6, stride=2)
-        self.cov1d2 = nn.Conv1d(2, 4, kernel_size=6, stride=2)
-        self.cov1d3 = nn.Conv1d(4, 6, kernel_size=6, stride=2)
+        self.cov1d = nn.Conv1d(1, 4, kernel_size=6, stride=2)
+        self.cov1d2 = nn.Conv1d(4, 12, kernel_size=6, stride=2)
+        self.cov1d3 = nn.Conv1d(12, 8, kernel_size=6, stride=2)
 
     def forward(self, x):
         x = self.cov1d(x)
@@ -95,9 +95,9 @@ class de_cov(nn.Module):
     def __init__(self):
         super().__init__()
 
-        self.upc = nn.ConvTranspose1d(6, 4, kernel_size=6, stride=2)
-        self.upc2 = nn.ConvTranspose1d(4, 2, kernel_size=6, stride=2)
-        self.upc3 = nn.ConvTranspose1d(2, 1, kernel_size=6, stride=2)
+        self.upc = nn.ConvTranspose1d(8, 12, kernel_size=6, stride=2)
+        self.upc2 = nn.ConvTranspose1d(12, 4, kernel_size=6, stride=2)
+        self.upc3 = nn.ConvTranspose1d(4, 1, kernel_size=6, stride=2)
 
     def forward(self, x):
         x = self.upc(x)
