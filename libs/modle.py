@@ -167,7 +167,7 @@ def beatch_cut(bt, pdd: list):
     blcn = bt.size()[0]
     blc = torch.chunk(bt, blcn, dim=0)
     for idx, i in enumerate(blc):
-        if i==0:
+        if int(pdd[idx])==0:
             act.append(i)
             continue
         icp = -int(pdd[idx])
