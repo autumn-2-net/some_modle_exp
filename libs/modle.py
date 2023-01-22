@@ -142,7 +142,7 @@ class vec_pl(pl.LightningModule):
         loss = self.loss(b1, b2)
 
         self.step = self.step + 1
-        if self.step % 500 == 0:
+        if self.step % 40 == 0:
             self._write_summary(self.step, beatch_cut(x, p), beatch_cut(y, p), loss)
 
         return loss
@@ -167,6 +167,9 @@ def beatch_cut(bt, pdd: list):
     blcn = bt.size()[0]
     blc = torch.chunk(bt, blcn, dim=0)
     for idx, i in enumerate(blc):
+        if i==0:
+            act.append(i)
+            continue
         icp = -int(pdd[idx])
         act.append(i.squeeze(0).squeeze(0)[:icp].unsqueeze(0).unsqueeze(0))
 
@@ -210,6 +213,8 @@ class Collator:
     def collate(self, minibatch):
 
         time = int(random.randint(1, 2) * random.random() * 44100)
+        if time < 40:
+            time =time +100
         pplsdc = []
 
         for record in minibatch:
