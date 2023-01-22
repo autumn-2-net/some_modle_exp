@@ -152,8 +152,8 @@ class vec_pl(pl.LightningModule):
         # writer = tensorboard.SummaryWriter
         writer = SummaryWriter("./mdss/", purge_step=step)
         # writer = tensorboard
-        writer.add_audio('feature/audio', insound[0], step, sample_rate=self.params.sample_rate)
-        writer.add_audio('out/audio', outs[0], step, sample_rate=self.params.sample_rate)
+        writer.add_audio('feature/audio', insound[0], step, sample_rate=44100)
+        writer.add_audio('out/audio', outs[0], step, sample_rate=44100)
 
         writer.add_scalar('train/loss', loss, step)
         writer.add_scalar('train/grad_norm', self.grad_norm, step)
@@ -226,7 +226,7 @@ class Collator:
             record['audio'] = np.pad(record['audio'], (0, pdc[1]), mode='constant')
             pplsdc.append(pdc[1])
 
-        audio = np.stack([record['audio'] for record in minibatch if 'audio' in record])
+        # audio = np.stack([record['audio'] for record in minibatch if 'audio' in record])
         cdts = []
         for iee in minibatch:
             if 'audio' in iee:
