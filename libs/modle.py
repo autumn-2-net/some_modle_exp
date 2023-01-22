@@ -125,7 +125,7 @@ class vec_pl(pl.LightningModule):
         return x
 
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.parameters(), lr=0.002)
+        optimizer = torch.optim.AdamW(self.parameters(), lr=0.00002)
         return optimizer
 
     def on_after_backward(self):
