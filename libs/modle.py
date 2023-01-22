@@ -213,8 +213,8 @@ class Collator:
     def collate(self, minibatch):
 
         time = int(random.randint(1, 2) * random.random() * 44100)
-        if time < 40:
-            time =time +100
+        #if time < 40:
+         #   time =time +100
         pplsdc = []
 
         for record in minibatch:
