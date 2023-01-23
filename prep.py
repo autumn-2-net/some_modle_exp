@@ -6,4 +6,4 @@ from diffwave.preprocess import myuse
 
 if __name__ == '__main__':
 
-    myuse('./testwav')
+    myuse('./test')

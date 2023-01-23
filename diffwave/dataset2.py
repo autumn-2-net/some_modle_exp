@@ -140,14 +140,17 @@ class Collator:
         }
 
 
-def from_path(data_dirs, params, is_distributed=False):
+def from_path(data_dirs, params, is_distributed=False,ifv=False):
     if params.unconditional:
         dataset = UnconditionalDataset(data_dirs)
     else:  # with condition
         dataset = ConditionalDataset(data_dirs)
+    bs=params.batch_size
+    if ifv:
+        bs=1
     return torch.utils.data.DataLoader(
         dataset,
-        batch_size=params.batch_size,
+        batch_size=bs,
         collate_fn=Collator(params).collate,
         shuffle=not is_distributed,
         # num_workers=os.cpu_count(),

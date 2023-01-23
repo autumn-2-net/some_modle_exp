@@ -9,19 +9,25 @@ import torch.nn.functional as F
 from math import sqrt
 import numpy as np
 from pytorch_lightning import loggers as pl_loggers
+from torch.optim.lr_scheduler import MultiStepLR
 from torch.utils.tensorboard import SummaryWriter
+from tqdm import tqdm
+
 # tensorboard = pl_loggers.TensorBoardLogger(save_dir="")
 
 Linear = nn.Linear
 ConvTranspose2d = nn.ConvTranspose2d
+
+
 def Conv1d(*args, **kwargs):
     layer = nn.Conv1d(*args, **kwargs)
     nn.init.kaiming_normal_(layer.weight)
     return layer
+
+
 @torch.jit.script
 def silu(x):
     return x * torch.sigmoid(x)
-
 
 
 class DiffusionEmbedding(nn.Module):
@@ -57,13 +63,13 @@ class DiffusionEmbedding(nn.Module):
         return table
 
 
-class SpectrogramUpsampler(nn.Module):  #这里有点坑 这里是mel的上采样
+class SpectrogramUpsampler(nn.Module):  # 这里有点坑 这里是mel的上采样
     def __init__(self, n_mels):
         super().__init__()
-        if n_mels==256:
+        if n_mels == 256:
             self.conv1 = ConvTranspose2d(1, 1, [3, 32], stride=[1, 16], padding=[1, 8])
             self.conv2 = ConvTranspose2d(1, 1, [3, 32], stride=[1, 16], padding=[1, 8])
-        if n_mels ==512:
+        if n_mels == 512:
             self.conv1 = ConvTranspose2d(1, 1, [3, 64], stride=[1, 32], padding=[1, 16])
             self.conv2 = ConvTranspose2d(1, 1, [3, 32], stride=[1, 16], padding=[1, 8])
 
@@ -77,7 +83,7 @@ class SpectrogramUpsampler(nn.Module):  #这里有点坑 这里是mel的上采�
         return x
 
 
-class ResidualBlock(nn.Module): #残差块吧
+class ResidualBlock(nn.Module):  # 残差块吧
     def __init__(self, n_mels, residual_channels, dilation, uncond=False):
         '''
         :param n_mels: inplanes of conv1x1 for spectrogram conditional
@@ -89,7 +95,7 @@ class ResidualBlock(nn.Module): #残差块吧
         self.dilated_conv = Conv1d(residual_channels, 2 * residual_channels, 3, padding=dilation, dilation=dilation)
         self.diffusion_projection = Linear(512, residual_channels)
         if not uncond:  # conditional model
-            self.conditioner_projection = Conv1d(n_mels, 2 * residual_channels, 1)#??????????????
+            self.conditioner_projection = Conv1d(n_mels, 2 * residual_channels, 1)  # ??????????????
         else:  # unconditional model
             self.conditioner_projection = None
 
@@ -105,8 +111,8 @@ class ResidualBlock(nn.Module): #残差块吧
             y = self.dilated_conv(y)
         else:
             conditioner = self.conditioner_projection(conditioner)
-            xcxc=self.dilated_conv(y)
-            y = xcxc+ conditioner
+            xcxc = self.dilated_conv(y)
+            y = xcxc + conditioner
 
         gate, filter = torch.chunk(y, 2, dim=1)
         y = torch.sigmoid(gate) * torch.tanh(filter)
@@ -160,10 +166,10 @@ class DiffWave(nn.Module):
 
 
 class PL_diffwav(pl.LightningModule):
-    def __init__(self,params):
+    def __init__(self, params):
         super().__init__()
         self.params = params
-        self.diffwav=DiffWave(self.params)
+        self.diffwav = DiffWave(self.params)
 
         # self.model_dir = model_dir
         # self.model = model
@@ -181,10 +187,17 @@ class PL_diffwav(pl.LightningModule):
         self.loss_fn = nn.L1Loss()
         self.summary_writer = None
         self.grad_norm = 0
+        self.lrc = self.params.learning_rate
+        self.val_loss=0
+        self.valc={}
 
     def forward(self, audio, diffusion_step, spectrogram=None):
 
         return self.diffwav(audio, diffusion_step, spectrogram)
+
+    def on_before_zero_grad(self, optimizer):
+        # print(optimizer.state_dict()['param_groups'][0]['lr'],self.global_step)
+        self.lrc = optimizer.state_dict()['param_groups'][0]['lr']
 
     def training_step(self, batch, batch_idx):
         # training_step defines the train loop.
@@ -197,13 +210,12 @@ class PL_diffwav(pl.LightningModule):
         # # Logging to TensorBoard (if installed) by default
         # self.log("train_loss", loss)
         # return loss
-        self.step = self.step+1
+        # self.step = self.step+1
         pass
-        accc={
-                'audio': batch[0],
-                'spectrogram': batch[1]
-            }
-
+        accc = {
+            'audio': batch[0],
+            'spectrogram': batch[1]
+        }
 
         audio = accc['audio']
         spectrogram = accc['spectrogram']
@@ -221,21 +233,25 @@ class PL_diffwav(pl.LightningModule):
         predicted = self.forward(noisy_audio, t, spectrogram)
         loss = self.loss_fn(noise, predicted.squeeze(1))
         if self.is_master:
-            if self.step % 5 == 0:
-                self._write_summary(self.step, accc, loss)
-
-
+            if self.global_step % 5 == 0:
+                self._write_summary(self.global_step, accc, loss)
 
         return loss
 
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.parameters(),  lr=self.params.learning_rate)
-        return optimizer
+        optimizer = torch.optim.AdamW(self.parameters(), lr=self.params.learning_rate)
+        lt = {
+            "scheduler": MultiStepLR(optimizer, self.params.lrcl, self.params.lrcc),  # 调度器
+            "interval": self.params.interval,  # 调度的单位，epoch或step
+            "frequency": self.params.frequency,  # 调度的频率，多少轮一次
+            "reduce_on_plateau": False,  # ReduceLROnPlateau
+            "monitor": "val_loss",  # ReduceLROnPlateau的监控指标
+            "strict": False  # 如果没有monitor，是否中断训练
+        }
+        return {"optimizer": optimizer, "lr_scheduler": lt}
 
     def on_after_backward(self):
-        self.grad_norm =nn.utils.clip_grad_norm_(self.parameters(), self.params.max_grad_norm or 1e9)
-
-
+        self.grad_norm = nn.utils.clip_grad_norm_(self.parameters(), self.params.max_grad_norm or 1e9)
 
     # train
 
@@ -249,26 +265,106 @@ class PL_diffwav(pl.LightningModule):
             writer.add_image('feature/spectrogram', torch.flip(features['spectrogram'][:1], [1]), step)
         writer.add_scalar('train/loss', loss, step)
         writer.add_scalar('train/grad_norm', self.grad_norm, step)
-        writer.add_scalar('train/lr', self.optimizer.state_dict()['param_groups'][0]['lr'], step)
+        writer.add_scalar('train/lr', self.lrc, step)
         writer.flush()
         self.summary_writer = writer
+
+    def on_validation_end(self):
+        writer = SummaryWriter("./mds/", purge_step=self.global_step)
+        writer.add_scalar('val/loss', self.val_loss, self.global_step)
+        writer.add_audio('val/audio_gt', self.valc['audio'][0], self.global_step, sample_rate=self.params.sample_rate)
+        writer.add_audio('val/audio_g', self.valc['gad'][0], self.global_step, sample_rate=self.params.sample_rate)
+        writer.add_image('val/spectrogram', torch.flip(self.valc['spectrogram'][:1], [1]), self.global_step)
+
+    def validation_step(self, batch, idx):
+        # print(idx)
+        if idx==0:
+            self.val_loss=0
+
+        accc = {
+            'audio': batch[0],
+            'spectrogram': batch[1]
+        }
+        self.valc=accc
+
+        audio = accc['audio']
+        spectrogram = accc['spectrogram']
+        aaac,opo=self.predict(spectrogram)
+        loss= self.loss_fn(aaac, audio)
+        self.valc['gad']=aaac
+        # print(loss)
+        self.val_loss = (loss+self.val_loss)/2
+
+        return loss
+
+    def predict(self,spectrogram=None, fast_sampling=False):
+        # Lazy load model.
+        device=spectrogram.device
+
+
+
+        with torch.no_grad():
+            # Change in notation from the DiffWave paper for fast sampling.
+            # DiffWave paper -> Implementation below
+            # --------------------------------------
+            # alpha -> talpha
+            # beta -> training_noise_schedule
+            # gamma -> alpha
+            # eta -> beta
+            training_noise_schedule = np.array(self.params.noise_schedule)
+            inference_noise_schedule = np.array(
+                self.params.inference_noise_schedule) if fast_sampling else training_noise_schedule
+
+            talpha = 1 - training_noise_schedule
+            talpha_cum = np.cumprod(talpha)
+
+            beta = inference_noise_schedule
+            alpha = 1 - beta
+            alpha_cum = np.cumprod(alpha)
+
+            T = []
+            for s in range(len(inference_noise_schedule)):
+                for t in range(len(training_noise_schedule) - 1):
+                    if talpha_cum[t + 1] <= alpha_cum[s] <= talpha_cum[t]:
+                        twiddle = (talpha_cum[t] ** 0.5 - alpha_cum[s] ** 0.5) / (
+                                    talpha_cum[t] ** 0.5 - talpha_cum[t + 1] ** 0.5)
+                        T.append(t + twiddle)
+                        break
+            T = np.array(T, dtype=np.float32)
+
+            if not self.params.unconditional:
+                if len(spectrogram.shape) == 2:  # Expand rank 2 tensors by adding a batch dimension.
+                    spectrogram = spectrogram.unsqueeze(0)
+                spectrogram = spectrogram.to(device)
+                audio = torch.randn(spectrogram.shape[0], self.params.hop_samples * spectrogram.shape[-1],
+                                    device=device)
+            else:
+                audio = torch.randn(1, self.paramsaudio_len, device=device)
+
+            for n in tqdm(range(len(alpha) - 1, -1, -1)):
+                # print(n)
+                # for n in range(len(alpha) - 1, -1, -1):  #扩散过程
+                c1 = 1 / alpha[n] ** 0.5
+                c2 = beta[n] / (1 - alpha_cum[n]) ** 0.5
+                audio = c1 * (audio - c2 * self.forward(audio, torch.tensor([T[n]], device=audio.device), spectrogram).squeeze(
+                    1))
+                if n > 0:
+                    noise = torch.randn_like(audio)
+                    sigma = ((1.0 - alpha_cum[n - 1]) / (1.0 - alpha_cum[n]) * beta[n]) ** 0.5
+                    audio += sigma * noise
+                # audio = torch.clamp(audio, -1.0, 1.0)
+        return audio, self.params.sample_rate
+
 
 if __name__ == "__main__":
     from diffwave.dataset2 import from_path, from_gtzan
     from diffwave.params import params
 
     # torch.backends.cudnn.benchmark = True
-    md=PL_diffwav(params)
+    md = PL_diffwav(params)
     tensorboard = pl_loggers.TensorBoardLogger(save_dir="")
-    dataset = from_path(['./testwav/',r'K:\dataa\OpenSinger'], params)
+    dataset = from_path(['./testwav/', r'K:\dataa\OpenSinger'], params)
+    datasetv = from_path(['./test/', ], params,ifv=True)
 
-    trainer = pl.Trainer( max_epochs=100,logger=tensorboard,gpus=1,benchmark=True)
-    trainer.fit(model=md, train_dataloader=dataset)
-
-
-
-
-
-
-
-
+    trainer = pl.Trainer(max_epochs=100, logger=tensorboard, gpus=1, benchmark=True,num_sanity_val_steps=3,val_check_interval=10)
+    trainer.fit(model=md, train_dataloader=dataset,val_dataloaders=datasetv,)
