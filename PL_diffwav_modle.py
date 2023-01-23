@@ -12,7 +12,7 @@ from pytorch_lightning import loggers as pl_loggers
 from torch.optim.lr_scheduler import MultiStepLR
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
-
+from diffwave import tfff
 # tensorboard = pl_loggers.TensorBoardLogger(save_dir="")
 
 Linear = nn.Linear
@@ -233,7 +233,7 @@ class PL_diffwav(pl.LightningModule):
         predicted = self.forward(noisy_audio, t, spectrogram)
         loss = self.loss_fn(noise, predicted.squeeze(1))
         if self.is_master:
-            if self.global_step % 5 == 0:
+            if self.global_step % 50 == 0:
                 self._write_summary(self.global_step, accc, loss)
 
         return loss
@@ -274,7 +274,8 @@ class PL_diffwav(pl.LightningModule):
         writer.add_scalar('val/loss', self.val_loss, self.global_step)
         writer.add_audio('val/audio_gt', self.valc['audio'][0], self.global_step, sample_rate=self.params.sample_rate)
         writer.add_audio('val/audio_g', self.valc['gad'][0], self.global_step, sample_rate=self.params.sample_rate)
-        writer.add_image('val/spectrogram', torch.flip(self.valc['spectrogram'][:1], [1]), self.global_step)
+        writer.add_image('val/GT_spectrogram', torch.flip(self.valc['spectrogram'][:1], [1]), self.global_step)
+        writer.add_image('val/G_spectrogram', torch.flip(self.valc['spectrogramg'][:1], [1]), self.global_step)
 
     def validation_step(self, batch, idx):
         # print(idx)
@@ -294,6 +295,8 @@ class PL_diffwav(pl.LightningModule):
         self.valc['gad']=aaac
         # print(loss)
         self.val_loss = (loss+self.val_loss)/2
+
+        self.valc['spectrogramg'] =tfff.transform(aaac.detach().cpu())
 
         return loss
 
