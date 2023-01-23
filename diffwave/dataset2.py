@@ -150,10 +150,13 @@ def from_path(data_dirs, params, is_distributed=False):
         batch_size=params.batch_size,
         collate_fn=Collator(params).collate,
         shuffle=not is_distributed,
-        num_workers=os.cpu_count(),
+        # num_workers=os.cpu_count(),
+        num_workers=params.num_cpu,
+
         sampler=DistributedSampler(dataset) if is_distributed else None,
-        pin_memory=True,
-        drop_last=True)
+        pin_memory=params.pin_memory,
+        drop_last=params.drop_last  # flase hao hai shi?
+    )
 
 
 def from_gtzan(params, is_distributed=False):
