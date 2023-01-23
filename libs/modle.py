@@ -74,11 +74,12 @@ class en_cov(nn.Module):
 
 
         self.cov1d = nn.Conv1d(1, 4, kernel_size=6, stride=2)
-        self.nom = nn.LayerNorm(4)
+        self.nom = nn.BatchNorm1d(4)
         self.cov1d2 = nn.Conv1d(4, 12, kernel_size=6, stride=2)
-        self.nom2 = nn.LayerNorm(12)
+        self.nom2 = nn.BatchNorm1d(12)
+
         self.cov1d3 = nn.Conv1d(12, 8, kernel_size=6, stride=2)
-        self.nom3 = nn.LayerNorm(8)
+        self.nom3 = nn.BatchNorm1d(8)
 
     def forward(self, x):
         x = self.cov1d(x)
@@ -127,9 +128,9 @@ class de_cov(nn.Module):
         super().__init__()
 
         self.upc = nn.ConvTranspose1d(8, 12, kernel_size=6, stride=2)
-        self.nom = nn.LayerNorm(12)
+        self.nom = nn.BatchNorm1d(12)
         self.upc2 = nn.ConvTranspose1d(12, 4, kernel_size=6, stride=2)
-        self.nom = nn.LayerNorm(4)
+        self.nom = nn.BatchNorm1d(4)
         self.upc3 = nn.ConvTranspose1d(4, 1, kernel_size=6, stride=2)
 
     def forward(self, x):
@@ -302,7 +303,7 @@ def from_path(data_dirs, is_distributed=False):
 
 if __name__ == "__main__":
     torch.backends.cudnn.benchmark = True
-    md = vec_pl().load_from_checkpoint(r'C:\Users\autumn\Desktop\poject_all\vcoder\libs\sdxc\version_16\checkpoints\epoch=85-step=113347.ckpt')
+    md = vec_pl()#.load_from_checkpoint(r'C:\Users\autumn\Desktop\poject_all\vcoder\libs\sdxc\version_16\checkpoints\epoch=85-step=113347.ckpt')
     tensorboard = pl_loggers.TensorBoardLogger(save_dir="", name='sdxc')
     dataset = from_path([r'C:\Users\autumn\Desktop\poject_all\vcoder\testwav'], )
 
