@@ -300,7 +300,7 @@ def from_path(data_dirs, is_distributed=False):
     dataset = ConditionalDataset(data_dirs)
     return torch.utils.data.DataLoader(
         dataset,
-        batch_size=128,
+        batch_size=48,
         collate_fn=Collator().collate,
         shuffle=not is_distributed,
         # num_workers=os.cpu_count(),
