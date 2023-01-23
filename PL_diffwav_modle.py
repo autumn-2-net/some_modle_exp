@@ -366,5 +366,5 @@ if __name__ == "__main__":
     dataset = from_path(['./testwav/', r'K:\dataa\OpenSinger'], params)
     datasetv = from_path(['./test/', ], params,ifv=True)
 
-    trainer = pl.Trainer(max_epochs=100, logger=tensorboard, gpus=1, benchmark=True,num_sanity_val_steps=3,val_check_interval=10)
+    trainer = pl.Trainer(max_epochs=100, logger=tensorboard, gpus=1, benchmark=True,num_sanity_val_steps=5,val_check_interval=params.valst)
     trainer.fit(model=md, train_dataloader=dataset,val_dataloaders=datasetv,)

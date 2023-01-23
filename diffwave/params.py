@@ -64,6 +64,7 @@ params = AttrDict(
     interval='epoch',  # 调度的单位，epoch或step
     lrcc=0.9,  # 酸碱率
     lrcl=[10, 20, 30],  # 衰减间隔
-    frequency=1  # 衰减器 频率
+    frequency=1,  # 衰减器 频率
+valst=5000
 
 )
