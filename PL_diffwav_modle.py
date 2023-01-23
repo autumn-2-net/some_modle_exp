@@ -259,7 +259,7 @@ if __name__ == "__main__":
     torch.backends.cudnn.benchmark = True
     md=PL_diffwav(params)
     tensorboard = pl_loggers.TensorBoardLogger(save_dir="")
-    dataset = from_path(['./testwav/',], params)
+    dataset = from_path(['./testwav/',r'K:\dataa\OpenSinger'], params)
 
     trainer = pl.Trainer( max_epochs=100,logger=tensorboard,gpus=1)
     trainer.fit(model=md, train_dataloader=dataset)
