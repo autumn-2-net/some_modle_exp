@@ -75,22 +75,28 @@ class en_cov(nn.Module):
 
         self.cov1d = nn.Conv1d(1, 4, kernel_size=6, stride=2)
         self.nom = nn.BatchNorm1d(4)
+        self.res1=res_modle(n_layer=4,chanal=4)
         self.cov1d2 = nn.Conv1d(4, 12, kernel_size=6, stride=2)
         self.nom2 = nn.BatchNorm1d(12)
+        self.res2 = res_modle(n_layer=5, chanal=12)
 
         self.cov1d3 = nn.Conv1d(12, 8, kernel_size=6, stride=2)
         self.nom3 = nn.BatchNorm1d(8)
+        self.res3 = res_modle(n_layer=5, chanal=8)
 
     def forward(self, x):
         x = self.cov1d(x)
         x = silu(x)
         x=self.nom (x)
+        x=self.res3 (x)
         x = self.cov1d2(x)
         x = silu(x)
         x = self.nom2(x)
+        x = self.res3(x)
         x = self.cov1d3(x)
         x = silu(x)
         x = self.nom3(x)
+        x = self.res3(x)
         return x
 
 
@@ -103,7 +109,7 @@ class res_block(nn.Module):
 
         super().__init__()
         self.cov =nn.Conv1d(in_channels=chanal,out_channels=chanal,kernel_size=covsiz,stride=stride,padding=padding)
-        self.nom=nn.LayerNorm(chanal)
+        self.nom=nn.BatchNorm1d(chanal)
 
 
 
@@ -119,7 +125,7 @@ class res_modle(nn.Module):
     def __init__(self,n_layer,chanal,):
         super().__init__() #cov4 = nn.Conv2d(in_channels=3, out_channels=512, kernel_size=(3, 3),padding=1)
 
-        self.res_net =nn.Sequential(*[res_block(chanal=chanal,covsiz=(3,3),stride=1,padding=1) for res in range(n_layer)]) #        self.blocks = nn.Sequential(*[GPT_Block(config = config) for _ in range(config.n_layer)])
+        self.res_net =nn.Sequential(*[res_block(chanal=chanal,covsiz=3,stride=1,padding=1) for res in range(n_layer)]) #        self.blocks = nn.Sequential(*[GPT_Block(config = config) for _ in range(config.n_layer)])
     def forward(self, x):
         return self.res_net(x)
 
@@ -129,17 +135,21 @@ class de_cov(nn.Module):
 
         self.upc = nn.ConvTranspose1d(8, 12, kernel_size=6, stride=2)
         self.nom = nn.BatchNorm1d(12)
+        self.res3 = res_modle(n_layer=5, chanal=12)
         self.upc2 = nn.ConvTranspose1d(12, 4, kernel_size=6, stride=2)
-        self.nom = nn.BatchNorm1d(4)
+        self.nom2 = nn.BatchNorm1d(4)
+        self.res2 = res_modle(n_layer=5, chanal=4)
         self.upc3 = nn.ConvTranspose1d(4, 1, kernel_size=6, stride=2)
 
     def forward(self, x):
         x = self.upc(x)
         x = silu(x)
         x=self.nom (x)
+        x=self.res3 (x)
         x = self.upc2(x)
         x = silu(x)
         x = self.nom2(x)
+        x = self.res2(x)
         x = self.upc3(x)
         x = silu(x)
         return x
@@ -290,7 +300,7 @@ def from_path(data_dirs, is_distributed=False):
     dataset = ConditionalDataset(data_dirs)
     return torch.utils.data.DataLoader(
         dataset,
-        batch_size=48,
+        batch_size=128,
         collate_fn=Collator().collate,
         shuffle=not is_distributed,
         # num_workers=os.cpu_count(),
