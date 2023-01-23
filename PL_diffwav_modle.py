@@ -57,11 +57,15 @@ class DiffusionEmbedding(nn.Module):
         return table
 
 
-class SpectrogramUpsampler(nn.Module):
+class SpectrogramUpsampler(nn.Module):  #这里有点坑 这里是mel的上采样
     def __init__(self, n_mels):
         super().__init__()
-        self.conv1 = ConvTranspose2d(1, 1, [3, 32], stride=[1, 16], padding=[1, 8])
-        self.conv2 = ConvTranspose2d(1, 1, [3, 32], stride=[1, 16], padding=[1, 8])
+        if n_mels==256:
+            self.conv1 = ConvTranspose2d(1, 1, [3, 32], stride=[1, 16], padding=[1, 8])
+            self.conv2 = ConvTranspose2d(1, 1, [3, 32], stride=[1, 16], padding=[1, 8])
+        if n_mels ==512:
+            self.conv1 = ConvTranspose2d(1, 1, [3, 64], stride=[1, 32], padding=[1, 16])
+            self.conv2 = ConvTranspose2d(1, 1, [3, 32], stride=[1, 16], padding=[1, 8])
 
     def forward(self, x):
         x = torch.unsqueeze(x, 1)
@@ -85,7 +89,7 @@ class ResidualBlock(nn.Module): #残差块吧
         self.dilated_conv = Conv1d(residual_channels, 2 * residual_channels, 3, padding=dilation, dilation=dilation)
         self.diffusion_projection = Linear(512, residual_channels)
         if not uncond:  # conditional model
-            self.conditioner_projection = Conv1d(n_mels, 2 * residual_channels, 1)
+            self.conditioner_projection = Conv1d(n_mels, 2 * residual_channels, 1)#??????????????
         else:  # unconditional model
             self.conditioner_projection = None
 
@@ -101,7 +105,8 @@ class ResidualBlock(nn.Module): #残差块吧
             y = self.dilated_conv(y)
         else:
             conditioner = self.conditioner_projection(conditioner)
-            y = self.dilated_conv(y) + conditioner
+            xcxc=self.dilated_conv(y)
+            y = xcxc+ conditioner
 
         gate, filter = torch.chunk(y, 2, dim=1)
         y = torch.sigmoid(gate) * torch.tanh(filter)
@@ -120,7 +125,7 @@ class DiffWave(nn.Module):
         if self.params.unconditional:  # use unconditional model  #不知道干什么的
             self.spectrogram_upsampler = None
         else:
-            self.spectrogram_upsampler = SpectrogramUpsampler(params.n_mels)
+            self.spectrogram_upsampler = SpectrogramUpsampler(params.hop_samples)
 
         self.residual_layers = nn.ModuleList([
             ResidualBlock(params.n_mels, params.residual_channels, 2 ** (i % params.dilation_cycle_length),
@@ -254,7 +259,7 @@ if __name__ == "__main__":
     torch.backends.cudnn.benchmark = True
     md=PL_diffwav(params)
     tensorboard = pl_loggers.TensorBoardLogger(save_dir="")
-    dataset = from_path(['./testwav/'], params)
+    dataset = from_path(['./testwav/',], params)
 
     trainer = pl.Trainer( max_epochs=100,logger=tensorboard,gpus=1)
     trainer.fit(model=md, train_dataloader=dataset)
