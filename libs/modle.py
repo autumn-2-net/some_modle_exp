@@ -74,28 +74,28 @@ class en_cov(nn.Module):
 
 
         self.cov1d = nn.Conv1d(1, 4, kernel_size=6, stride=2)
-        self.nom = nn.BatchNorm1d(4)
+
         self.res1=res_modle(n_layer=4,chanal=4)
         self.cov1d2 = nn.Conv1d(4, 12, kernel_size=6, stride=2)
-        self.nom2 = nn.BatchNorm1d(12)
+
         self.res2 = res_modle(n_layer=5, chanal=12)
 
         self.cov1d3 = nn.Conv1d(12, 8, kernel_size=6, stride=2)
-        self.nom3 = nn.BatchNorm1d(8)
+
         self.res3 = res_modle(n_layer=5, chanal=8)
 
     def forward(self, x):
         x = self.cov1d(x)
         x = silu(x)
-        x=self.nom (x)
+
         x=self.res1 (x)
         x = self.cov1d2(x)
         x = silu(x)
-        x = self.nom2(x)
+
         x = self.res2(x)
         x = self.cov1d3(x)
         x = silu(x)
-        x = self.nom3(x)
+
         x = self.res3(x)
         return x
 
@@ -109,7 +109,7 @@ class res_block(nn.Module):
 
         super().__init__()
         self.cov =nn.Conv1d(in_channels=chanal,out_channels=chanal,kernel_size=covsiz,stride=stride,padding=padding)
-        self.nom=nn.BatchNorm1d(chanal)
+
 
 
 
@@ -119,7 +119,7 @@ class res_block(nn.Module):
         b =self.cov(x)
         # b=self.relu(b)
         b = silu(b)
-        return self.nom(a+b)
+        return a+b
 
 class res_modle(nn.Module):
     def __init__(self,n_layer,chanal,):
@@ -134,21 +134,21 @@ class de_cov(nn.Module):
         super().__init__()
 
         self.upc = nn.ConvTranspose1d(8, 12, kernel_size=6, stride=2)
-        self.nom = nn.BatchNorm1d(12)
+
         self.res3 = res_modle(n_layer=5, chanal=12)
         self.upc2 = nn.ConvTranspose1d(12, 4, kernel_size=6, stride=2)
-        self.nom2 = nn.BatchNorm1d(4)
+
         self.res2 = res_modle(n_layer=5, chanal=4)
         self.upc3 = nn.ConvTranspose1d(4, 1, kernel_size=6, stride=2)
 
     def forward(self, x):
         x = self.upc(x)
         x = silu(x)
-        x=self.nom (x)
+
         x=self.res3 (x)
         x = self.upc2(x)
         x = silu(x)
-        x = self.nom2(x)
+
         x = self.res2(x)
         x = self.upc3(x)
         x = silu(x)
@@ -171,7 +171,7 @@ class vec_pl(pl.LightningModule):
         return x
 
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.parameters(), lr=0.002)
+        optimizer = torch.optim.AdamW(self.parameters(), lr=0.0002)
         return optimizer
 
     def on_after_backward(self):
@@ -313,7 +313,7 @@ def from_path(data_dirs, is_distributed=False):
 
 if __name__ == "__main__":
     torch.backends.cudnn.benchmark = True
-    md = vec_pl()#.load_from_checkpoint(r'C:\Users\autumn\Desktop\poject_all\vcoder\libs\sdxc\version_16\checkpoints\epoch=85-step=113347.ckpt')
+    md = vec_pl()#.load_from_checkpoint(r'C:\Users\autumn\Desktop\poject_all\vcoder\libs\sdxc\version_26\checkpoints\epoch=5-step=7907.ckpt')
     tensorboard = pl_loggers.TensorBoardLogger(save_dir="", name='sdxc')
     dataset = from_path([r'C:\Users\autumn\Desktop\poject_all\vcoder\testwav'], )
 
