@@ -221,7 +221,7 @@ class PL_diffwav(pl.LightningModule):
         predicted = self.forward(noisy_audio, t, spectrogram)
         loss = self.loss_fn(noise, predicted.squeeze(1))
         if self.is_master:
-            if self.step % 50 == 0:
+            if self.step % 5 == 0:
                 self._write_summary(self.step, accc, loss)
 
 
@@ -249,6 +249,7 @@ class PL_diffwav(pl.LightningModule):
             writer.add_image('feature/spectrogram', torch.flip(features['spectrogram'][:1], [1]), step)
         writer.add_scalar('train/loss', loss, step)
         writer.add_scalar('train/grad_norm', self.grad_norm, step)
+        writer.add_scalar('train/lr', self.optimizer.state_dict()['param_groups'][0]['lr'], step)
         writer.flush()
         self.summary_writer = writer
 
@@ -256,12 +257,12 @@ if __name__ == "__main__":
     from diffwave.dataset2 import from_path, from_gtzan
     from diffwave.params import params
 
-    torch.backends.cudnn.benchmark = True
+    # torch.backends.cudnn.benchmark = True
     md=PL_diffwav(params)
     tensorboard = pl_loggers.TensorBoardLogger(save_dir="")
     dataset = from_path(['./testwav/',r'K:\dataa\OpenSinger'], params)
 
-    trainer = pl.Trainer( max_epochs=100,logger=tensorboard,gpus=1)
+    trainer = pl.Trainer( max_epochs=100,logger=tensorboard,gpus=1,benchmark=True)
     trainer.fit(model=md, train_dataloader=dataset)
 
 
