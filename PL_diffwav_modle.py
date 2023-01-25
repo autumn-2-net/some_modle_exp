@@ -189,7 +189,7 @@ class PL_diffwav(pl.LightningModule):
         self.grad_norm = 0
         self.lrc = self.params.learning_rate
         self.val_loss=0
-        self.valc={}
+        self.valc=[]
 
     def forward(self, audio, diffusion_step, spectrogram=None):
 
@@ -272,31 +272,37 @@ class PL_diffwav(pl.LightningModule):
     def on_validation_end(self):
         writer = SummaryWriter("./mds/", purge_step=self.global_step)
         writer.add_scalar('val/loss', self.val_loss, self.global_step)
-        writer.add_audio('val/audio_gt', self.valc['audio'][0], self.global_step, sample_rate=self.params.sample_rate)
-        writer.add_audio('val/audio_g', self.valc['gad'][0], self.global_step, sample_rate=self.params.sample_rate)
-        writer.add_image('val/GT_spectrogram', torch.flip(self.valc['spectrogram'][:1], [1]), self.global_step)
-        writer.add_image('val/G_spectrogram', torch.flip(self.valc['spectrogramg'][:1], [1]), self.global_step)
+
+        for idx,i in enumerate(self.valc):
+            writer.add_audio('val_'+str(self.global_step)+'/audio_gt', i['audio'][0], idx,
+                             sample_rate=self.params.sample_rate)
+            writer.add_audio('val_'+str(self.global_step)+'/audio_g', i['gad'][0], idx, sample_rate=self.params.sample_rate)
+            writer.add_image('val_'+str(self.global_step)+'/GT_spectrogram', torch.flip(i['spectrogram'][:1], [1]), idx)
+            writer.add_image('val_'+str(self.global_step)+'/G_spectrogram', torch.flip(i['spectrogramg'][:1], [1]), idx)
+
 
     def validation_step(self, batch, idx):
         # print(idx)
         if idx==0:
             self.val_loss=0
+            self.valc = []
 
         accc = {
             'audio': batch[0],
             'spectrogram': batch[1]
         }
-        self.valc=accc
+        # self.valc=accc
 
         audio = accc['audio']
         spectrogram = accc['spectrogram']
         aaac,opo=self.predict(spectrogram)
         loss= self.loss_fn(aaac, audio)
-        self.valc['gad']=aaac
+        accc['gad']=aaac
         # print(loss)
         self.val_loss = (loss+self.val_loss)/2
 
-        self.valc['spectrogramg'] =tfff.transform(aaac.detach().cpu())
+        accc =tfff.transform(aaac.detach().cpu())
+        self.valc.append(accc)
 
         return loss
 
@@ -369,5 +375,5 @@ if __name__ == "__main__":
     dataset = from_path(['./testwav/', r'K:\dataa\OpenSinger'], params)
     datasetv = from_path(['./test/', ], params,ifv=True)
 
-    trainer = pl.Trainer(max_epochs=100, logger=tensorboard, gpus=1, benchmark=True,num_sanity_val_steps=5,val_check_interval=params.valst,resume_from_checkpoint='./default/version_50/checkpoints/epoch=13-step=148228.ckpt')
+    trainer = pl.Trainer(max_epochs=100, logger=tensorboard, gpus=1, benchmark=True,num_sanity_val_steps=5,val_check_interval=params.valst,resume_from_checkpoint='./default/version_51/checkpoints/epoch=14-step=158228.ckpt')
     trainer.fit(model=md, train_dataloader=dataset,val_dataloaders=datasetv,)
