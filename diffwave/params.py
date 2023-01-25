@@ -32,15 +32,15 @@ class AttrDict(dict):
         return self
 
 
-srr = 44100
+# srr = 44100
 params = AttrDict(
     # Training params
     batch_size=10,
     learning_rate=0.00025,
-    max_grad_norm=None,
+    max_grad_norm=None, #梯度裁切
 
     # Data params 预处理参数 及训练
-    sample_rate=srr,
+    sample_rate=44100,
     n_mels=128,
     n_fft=2048,
     hop_samples=512, #目前只正常256  512
@@ -62,14 +62,14 @@ win_length=512*4,
     pin_memory=True,  # 报仇内存
 
     # unconditional sample len
-    audio_len=srr * 5,  # unconditional_synthesis_samples
+    audio_len=44100 * 5,  # unconditional_synthesis_samples 没用不用管
 
     # 优化参数
     interval='epoch',  # 调度的单位，epoch或step
     lrcc=0.9,  # 酸碱率 衰减
     lrcl=[1,1,5, 20, 30],  # 衰减间隔
     frequency=1,  # 衰减器 频率
-valst=5000,
+valst=5000,#验证
     loger='TB', # TB or wandb
     
 
