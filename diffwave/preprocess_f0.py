@@ -24,10 +24,21 @@ from glob import glob
 from tqdm import tqdm
 
 from diffwave.params import params
+import pyworld as pw
+import pyworld
+import librosa
+
 
 
 def transform(filename):
   audio, sr = T.load(filename)
+  sound, _ = librosa.load(filename, sr=params.sample_rate,)
+  sound = sound.astype(np.double)
+  # 快修改不太好
+  _f0, t = pw.dio(sound, sr)  # raw pitch extractor
+  f01 = pw.stonemask(sound, _f0, t, sr)  # pitch refinement
+  # 第二种 慢效果好
+  f0, timeaxis = pyworld.harvest(sound, sr)
   audio = torch.clamp(audio[0], -1.0, 1.0)
 
   if params.sample_rate != sr:
@@ -63,7 +74,9 @@ def myuse(pathchs):
         list(tqdm(executor.map(transform, filenames), desc='Preprocessing', total=len(filenames)))
 
 if __name__ == '__main__':
-  parser = ArgumentParser(description='prepares a dataset to train DiffWave')
-  parser.add_argument('dir',
-      help='directory containing .wav files for training')
-  main(parser.parse_args())
+    # myuse('./test1')
+    transform('./test1/2099003695.wav')
+  # parser = ArgumentParser(description='prepares a dataset to train DiffWave')
+  # parser.add_argument('dir',
+  #     help='directory containing .wav files for training')
+  # main(parser.parse_args())

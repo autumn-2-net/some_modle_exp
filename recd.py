@@ -2,7 +2,7 @@ from collections import OrderedDict
 
 import torch
 
-aaaa=torch.load("./default/version_12/checkpoints/epoch=7-step=31623.ckpt")
+aaaa=torch.load(r"./default/version_51/checkpoints/epoch=14-step=158228.ckpt")
 print(aaaa['state_dict'])
 mds=OrderedDict()
 ddd={}
@@ -10,4 +10,4 @@ for i in aaaa['state_dict']:
     print(i)
     ddd[i.replace('diffwav.','')]=aaaa['state_dict'][i]
 mds=OrderedDict(ddd)
-torch.save(mds,'./ccc.cpt')
+torch.save(mds,'./ccci34.cpt')

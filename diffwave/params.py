@@ -39,12 +39,16 @@ params = AttrDict(
     learning_rate=0.00025,
     max_grad_norm=None,
 
-    # Data params
+    # Data params 预处理参数 及训练
     sample_rate=srr,
     n_mels=128,
     n_fft=2048,
-    hop_samples=512,
+    hop_samples=512, #目前只正常256  512
     crop_mel_frames=62,  # Probably an error in paper.
+    pre_power=1.0,
+f_min=20,
+f_max=44100 / 2.0,
+win_length=512*4,
 
     # Model params
     residual_layers=30,
@@ -63,8 +67,11 @@ params = AttrDict(
     # 优化参数
     interval='epoch',  # 调度的单位，epoch或step
     lrcc=0.9,  # 酸碱率
-    lrcl=[1,1, 20, 30],  # 衰减间隔
+    lrcl=[1,1,5, 20, 30],  # 衰减间隔
     frequency=1,  # 衰减器 频率
-valst=5000
+valst=5000,
+    loger='TB', # TB or wandb
+    
 
 )
+

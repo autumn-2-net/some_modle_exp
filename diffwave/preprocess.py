@@ -34,13 +34,13 @@ def transform(filename):
     raise ValueError(f'Invalid sample rate {sr}.')
   mel_args = {
       'sample_rate': sr,
-      'win_length': params.hop_samples * 4,
+      'win_length': params.win_length,
       'hop_length': params.hop_samples,
       'n_fft': params.n_fft,
-      'f_min': 20.0,
-      'f_max': sr / 2.0,
+      'f_min': params.f_min,
+      'f_max': params.f_max,
       'n_mels': params.n_mels,
-      'power': 1.0,
+      'power': params.pre_power,
       'normalized': True,
   }
   mel_spec_transform = TT.MelSpectrogram(**mel_args)
