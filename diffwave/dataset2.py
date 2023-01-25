@@ -68,11 +68,17 @@ class UnconditionalDataset(torch.utils.data.Dataset):
 
 
 class Collator:
-    def __init__(self, params):
+    def __init__(self, params,ifv):
         self.params = params
+        self.ifv=ifv
 
     def collate(self, minibatch):
         samples_per_frame = self.params.hop_samples
+        if  self.ifv:
+            crop_mel_frames=self.params.val_crop_mel_frames
+        else:
+            crop_mel_frames = self.params.crop_mel_frames
+
         for record in minibatch:
             if self.params.unconditional:
                 # Filter out records that aren't long enough.
@@ -87,13 +93,13 @@ class Collator:
                 record['audio'] = np.pad(record['audio'], (0, (end - start) - len(record['audio'])), mode='constant')
             else:
                 # Filter out records that aren't long enough.
-                if len(record['spectrogram']) < self.params.crop_mel_frames:
+                if len(record['spectrogram']) < crop_mel_frames:
                     del record['spectrogram']
                     del record['audio']
                     continue
 
-                start = random.randint(0, record['spectrogram'].shape[0] - self.params.crop_mel_frames)
-                end = start + self.params.crop_mel_frames
+                start = random.randint(0, record['spectrogram'].shape[0] - crop_mel_frames)
+                end = start + crop_mel_frames
                 record['spectrogram'] = record['spectrogram'][start:end].T
 
                 start *= samples_per_frame
@@ -151,7 +157,7 @@ def from_path(data_dirs, params, is_distributed=False,ifv=False):
     return torch.utils.data.DataLoader(
         dataset,
         batch_size=bs,
-        collate_fn=Collator(params).collate,
+        collate_fn=Collator(params,ifv).collate,
         shuffle=not is_distributed,
         # num_workers=os.cpu_count(),
         num_workers=params.num_cpu,
