@@ -301,7 +301,7 @@ class PL_diffwav(pl.LightningModule):
         # print(loss)
         self.val_loss = (loss+self.val_loss)/2
 
-        accc =tfff.transform(aaac.detach().cpu())
+        accc['spectrogramg'] =tfff.transform(aaac.detach().cpu())
         self.valc.append(accc)
 
         return loss
