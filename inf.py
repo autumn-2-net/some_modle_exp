@@ -24,7 +24,7 @@ from tqdm import tqdm
 
 from diffwave.params import AttrDict, params as base_params
 from diffwave.params import  params as sss
-from diffwave.model import DiffWave
+#from diffwave.model import DiffWave
 from PL_diffwav_modle import PL_diffwav
 
 models = {}
