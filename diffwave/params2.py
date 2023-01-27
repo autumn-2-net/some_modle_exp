@@ -47,8 +47,8 @@ params = AttrDict(
     crop_mel_frames=62,  # Probably an error in paper. 切割片
     val_crop_mel_frames=70,
     pre_power=1.0,
-    f_min=40,
-    f_max=16000,
+    f_min=20,
+    f_max=44100 / 2.0,
     win_length=512 * 4,
 
     # Model params
@@ -56,9 +56,9 @@ params = AttrDict(
     residual_channels=64,
     dilation_cycle_length=10,
     unconditional=False,
-    noise_schedule=np.linspace(1e-4, 0.05, 500).tolist(),  # 层
+    noise_schedule=np.linspace(1e-4, 0.05, 50).tolist(),  # 层
     inference_noise_schedule=[0.0001, 0.001, 0.01, 0.05, 0.2, 0.5],  # 加速
-    num_cpu=4,  # dl进程
+    num_cpu=2,  # dl进程
     drop_last=True,  # 丢批
     pin_memory=True,  # 报仇内存
 
