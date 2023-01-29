@@ -35,8 +35,8 @@ class AttrDict(dict):
 # srr = 44100
 params = AttrDict(
     # Training params
-    batch_size=34,
-    learning_rate=0.0002,
+    batch_size=10,
+    learning_rate=0.00025,
     max_grad_norm=None,  # 梯度裁切
 
     # Data params 预处理参数 及训练
@@ -53,10 +53,10 @@ params = AttrDict(
 
     # Model params
     residual_layers=30,
-    residual_channels=128,
+    residual_channels=64,
     dilation_cycle_length=10,
     unconditional=False,
-    noise_schedule=np.linspace(1e-4, 0.05, 1000).tolist(),  # 层
+    noise_schedule=np.linspace(1e-4, 0.05, 500).tolist(),  # 层
     inference_noise_schedule=[0.0001, 0.001, 0.01, 0.05, 0.2, 0.5],  # 加速
     num_cpu=4,  # dl进程
     drop_last=True,  # 丢批
@@ -66,11 +66,11 @@ params = AttrDict(
     audio_len=44100 * 5,  # unconditional_synthesis_samples 没用不用管
 
     # 优化参数
-    interval='step',  # 调度的单位，epoch或step
-    lrcc= 1.0005,  # 酸碱率 衰减
-    lrcl=1,  # 衰减间隔
+    interval='epoch',  # 调度的单位，epoch或step
+    lrcc=0.9,  # 酸碱率 衰减
+    lrcl=[1, 1, 5, 20, 30],  # 衰减间隔
     frequency=1,  # 衰减器 频率
-    valst=3000,  # 验证
+    valst=5000,  # 验证
     loger='TB',  # TB or wandb
 
 )
