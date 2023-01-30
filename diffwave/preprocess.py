@@ -41,14 +41,16 @@ def transform(filename):
       'f_max': params.f_max,
       'n_mels': params.n_mels,
       'power': params.pre_power,
-      'normalized': True,
+      'normalized': False,
+      'norm' : "slaney",
+  'mel_scale' : "slaney",
   }
   mel_spec_transform = TT.MelSpectrogram(**mel_args)
 
   with torch.no_grad():
     spectrogram = mel_spec_transform(audio)
-    spectrogram = 20 * torch.log10(torch.clamp(spectrogram, min=1e-5)) - 20
-    spectrogram = torch.clamp((spectrogram + 100) / 100, 0.0, 1.0)
+    # spectrogram = 20 * torch.log10(torch.clamp(spectrogram, min=1e-5)) - 20
+    # spectrogram = torch.clamp((spectrogram + 100) / 100, 0.0, 1.0)
     np.save(f'{filename}.spec.npy', spectrogram.cpu().numpy())
 
 
@@ -59,7 +61,7 @@ def main(args):
 
 def myuse(pathchs):
     filenames = glob(f'{pathchs}/**/*.wav', recursive=True)
-    with ProcessPoolExecutor() as executor:
+    with ProcessPoolExecutor(max_workers=6) as executor:
         list(tqdm(executor.map(transform, filenames), desc='Preprocessing', total=len(filenames)))
 
 if __name__ == '__main__':
