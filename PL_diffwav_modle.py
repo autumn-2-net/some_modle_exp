@@ -377,7 +377,7 @@ if __name__ == "__main__":
     tensorboard = pl_loggers.TensorBoardLogger(save_dir="bignet")
     dataset = from_path(['./testwav/', r'K:\dataa\OpenSinger'], params)
     datasetv = from_path(['./test/', ], params,ifv=True)
-    md=md.load_from_checkpoint('./default/version_59/checkpoints/epoch=29-step=316457.ckpt')
+    md=md.load_from_checkpoint('./default/version_59/checkpoints/epoch=29-step=316457.ckpt',params=params)
     trainer = pl.Trainer(max_epochs=100, logger=tensorboard, gpus=1, benchmark=True,num_sanity_val_steps=5,val_check_interval=params.valst,
                         # resume_from_checkpoint='./default/version_57/checkpoints/epoch=23-step=253292.ckpt'
                          )

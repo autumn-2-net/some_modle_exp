@@ -21,10 +21,46 @@ import torchaudio.transforms as TT
 from argparse import ArgumentParser
 from concurrent.futures import ProcessPoolExecutor
 from glob import glob
+
+from torchaudio.transforms import MelSpectrogram
 from tqdm import tqdm
 
 from diffwave.params import params
+def get_mel_from_audio(
+    # audio: torch.Tensor,
+    sample_rate=44100,
+    n_fft=2048,
+    win_length=2048,
+    hop_length=512,
+    f_min=40,
+    f_max=16000,
+    n_mels=128,
+    center=True,
+    power=1.0,
+    pad_mode="reflect",
+    norm="slaney",
+    mel_scale="slaney",
+) :
 
+
+    # assert audio.ndim == 2, "Audio tensor must be 2D (1, n_samples)"
+    # assert audio.shape[0] == 1, "Audio tensor must be mono"
+
+    transform = MelSpectrogram(
+        sample_rate=sample_rate,
+        n_fft=n_fft,
+        win_length=win_length,
+        hop_length=hop_length,
+        f_min=f_min,
+        f_max=f_max,
+        n_mels=n_mels,
+        center=center,
+        power=power,
+        pad_mode=pad_mode,
+        norm=norm,
+        mel_scale=mel_scale,
+    )#.to(audio.device)
+    return transform
 
 def transform(filename):
   audio, sr = T.load(filename)
@@ -46,10 +82,12 @@ def transform(filename):
   'mel_scale' : "slaney",
   }
   mel_spec_transform = TT.MelSpectrogram(**mel_args)
+  mel_spec_transform=get_mel_from_audio()
 
   with torch.no_grad():
     spectrogram = mel_spec_transform(audio)
     # spectrogram = 20 * torch.log10(torch.clamp(spectrogram, min=1e-5)) - 20
+    spectrogram=torch.log(torch.clamp(spectrogram, min=1e-5))
     # spectrogram = torch.clamp((spectrogram + 100) / 100, 0.0, 1.0)
     np.save(f'{filename}.spec.npy', spectrogram.cpu().numpy())
 
