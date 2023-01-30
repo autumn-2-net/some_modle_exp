@@ -295,7 +295,7 @@ class PL_diffwav(pl.LightningModule):
         return im
 
     def plot_mel(self, data, titles=None):
-        fig, axes = plt.subplots(len(data), 1, squeeze=False)
+        fig, axes = plt.subplots(len(data), 1, squeeze=False,figsize = (20, 20))
         if titles is None:
             titles = [None for i in range(len(data))]
         plt.tight_layout()
