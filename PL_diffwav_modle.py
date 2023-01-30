@@ -2,7 +2,7 @@ import os
 
 import torch
 import torch.nn as nn
-
+import matplotlib.pyplot as plt
 import pytorch_lightning as pl
 import torch.nn.functional as F
 
@@ -13,6 +13,7 @@ from torch.optim.lr_scheduler import MultiStepLR
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from diffwave import tfff
+
 # tensorboard = pl_loggers.TensorBoardLogger(save_dir="")
 
 Linear = nn.Linear
@@ -184,13 +185,13 @@ class PL_diffwav(pl.LightningModule):
         beta = np.array(self.params.noise_schedule)
         noise_level = np.cumprod(1 - beta)
         noise_level = torch.tensor(noise_level.astype(np.float32))
-        self.noise_level=noise_level
+        self.noise_level = noise_level
         self.loss_fn = nn.L1Loss()
         self.summary_writer = None
         self.grad_norm = 0
         self.lrc = self.params.learning_rate
-        self.val_loss=0
-        self.valc=[]
+        self.val_loss = 0
+        self.valc = []
 
     def forward(self, audio, diffusion_step, spectrogram=None):
 
@@ -235,7 +236,9 @@ class PL_diffwav(pl.LightningModule):
         loss = self.loss_fn(noise, predicted.squeeze(1))
         if self.is_master:
             if self.global_step % 50 == 0:
-                self._write_summary(self.global_step, accc, loss)
+                if self.global_step!=0:
+
+                    self._write_summary(self.global_step, accc, loss)
 
         return loss
 
@@ -265,29 +268,74 @@ class PL_diffwav(pl.LightningModule):
         # writer = tensorboard
         writer.add_audio('feature/audio', features['audio'][0], step, sample_rate=self.params.sample_rate)
         if not self.params.unconditional:
-            writer.add_image('feature/spectrogram', torch.flip(features['spectrogram'][:1], [1]), step)
+            mel = self.plot_mel([
+
+               features['spectrogram'][:1].detach().cpu().numpy()[0],
+            ],
+                [ "Ground-Truth Spectrogram"],
+            )
+            # writer.add_figure('val_' + str(self.global_step) + '/spectrogram', mel, idx)
+            writer.add_figure('feature/spectrogram',mel , step)
         writer.add_scalar('train/loss', loss, step)
         writer.add_scalar('train/grad_norm', self.grad_norm, step)
         writer.add_scalar('train/lr', self.lrc, step)
         writer.flush()
         self.summary_writer = writer
 
+    def mmmmd(self, t):
+
+        # axe.set_xticks(np.arange(len(x_labels)))
+        # axe.set_yticks(np.arange(len(y_labels)))
+        # axe.set_xticklabels(x_labels)
+        # axe.set_yticklabels(y_labels   )
+
+        fig, axe = plt.subplots(figsize=(20, 10))
+        im = axe.imshow(t.detach().cpu().numpy())
+        # plt.show()
+        return im
+
+    def plot_mel(self, data, titles=None):
+        fig, axes = plt.subplots(len(data), 1, squeeze=False)
+        if titles is None:
+            titles = [None for i in range(len(data))]
+        plt.tight_layout()
+
+        for i in range(len(data)):
+            mel = data[i]
+            if isinstance(mel, torch.Tensor):
+                mel = mel.detach().cpu().numpy()
+            axes[i][0].imshow(mel, origin="lower")
+            axes[i][0].set_aspect(2.5, adjustable="box")
+            axes[i][0].set_ylim(0, mel.shape[0])
+            axes[i][0].set_title(titles[i], fontsize="medium")
+            axes[i][0].tick_params(labelsize="x-small", left=False, labelleft=False)
+            axes[i][0].set_anchor("W")
+
+        return fig
+
     def on_validation_end(self):
         writer = SummaryWriter("./mdsr/", purge_step=self.global_step)
         writer.add_scalar('val/loss', self.val_loss, self.global_step)
 
-        for idx,i in enumerate(self.valc):
-            writer.add_audio('val_'+str(self.global_step)+'/audio_gt', i['audio'][0], idx,
+        for idx, i in enumerate(self.valc):
+            writer.add_audio('val_' + str(self.global_step) + '/audio_gt', i['audio'][0], idx,
                              sample_rate=self.params.sample_rate)
-            writer.add_audio('val_'+str(self.global_step)+'/audio_g', i['gad'][0], idx, sample_rate=self.params.sample_rate)
-            writer.add_image('val_'+str(self.global_step)+'/GT_spectrogram', torch.flip(i['spectrogram'][:1], [1]), idx)
-            writer.add_image('val_'+str(self.global_step)+'/G_spectrogram', torch.flip(i['spectrogramg'][:1], [1]), idx)
-
+            writer.add_audio('val_' + str(self.global_step) + '/audio_g', i['gad'][0], idx,
+                             sample_rate=self.params.sample_rate)
+            # writer.add_figure('val_'+str(self.global_step)+'/GT_spectrogram', self.mmmmd(torch.flip(i['spectrogram'][:1], [1])), idx)
+            # writer.add_figure('val_'+str(self.global_step)+'/G_spectrogram', self.mmmmd(torch.flip(i['spectrogramg'][:1], [1])), idx)
+            mel = self.plot_mel([
+               i['spectrogram'][:1].detach().cpu().numpy()[0],
+                i['spectrogramg'][:1].detach().cpu().numpy()[0],
+            ],
+                ["Sampled Spectrogram", "Ground-Truth Spectrogram"],
+            )
+            writer.add_figure('val_' + str(self.global_step) + '/spectrogram', mel, idx)
 
     def validation_step(self, batch, idx):
         # print(idx)
-        if idx==0:
-            self.val_loss=0
+        if idx == 0:
+            self.val_loss = 0
             self.valc = []
 
         accc = {
@@ -298,22 +346,20 @@ class PL_diffwav(pl.LightningModule):
 
         audio = accc['audio']
         spectrogram = accc['spectrogram']
-        aaac,opo=self.predict(spectrogram)
-        loss= self.loss_fn(aaac, audio)
-        accc['gad']=aaac
+        aaac, opo = self.predict(spectrogram)
+        loss = self.loss_fn(aaac, audio)
+        accc['gad'] = aaac
         # print(loss)
-        self.val_loss = (loss+self.val_loss)/2
+        self.val_loss = (loss + self.val_loss) / 2
 
-        accc['spectrogramg'] =tfff.transform(aaac.detach().cpu())
+        accc['spectrogramg'] = tfff.transform(aaac.detach().cpu())
         self.valc.append(accc)
 
         return loss
 
-    def predict(self,spectrogram=None, fast_sampling=True):
+    def predict(self, spectrogram=None, fast_sampling=True):
         # Lazy load model.
-        device=spectrogram.device
-
-
+        device = spectrogram.device
 
         with torch.no_grad():
             # Change in notation from the DiffWave paper for fast sampling.
@@ -339,7 +385,7 @@ class PL_diffwav(pl.LightningModule):
                 for t in range(len(training_noise_schedule) - 1):
                     if talpha_cum[t + 1] <= alpha_cum[s] <= talpha_cum[t]:
                         twiddle = (talpha_cum[t] ** 0.5 - alpha_cum[s] ** 0.5) / (
-                                    talpha_cum[t] ** 0.5 - talpha_cum[t + 1] ** 0.5)
+                                talpha_cum[t] ** 0.5 - talpha_cum[t + 1] ** 0.5)
                         T.append(t + twiddle)
                         break
             T = np.array(T, dtype=np.float32)
@@ -358,7 +404,8 @@ class PL_diffwav(pl.LightningModule):
                 # for n in range(len(alpha) - 1, -1, -1):  #扩散过程
                 c1 = 1 / alpha[n] ** 0.5
                 c2 = beta[n] / (1 - alpha_cum[n]) ** 0.5
-                audio = c1 * (audio - c2 * self.forward(audio, torch.tensor([T[n]], device=audio.device), spectrogram).squeeze(
+                audio = c1 * (audio - c2 * self.forward(audio, torch.tensor([T[n]], device=audio.device),
+                                                        spectrogram).squeeze(
                     1))
                 if n > 0:
                     noise = torch.randn_like(audio)
@@ -376,9 +423,10 @@ if __name__ == "__main__":
     md = PL_diffwav(params)
     tensorboard = pl_loggers.TensorBoardLogger(save_dir="bignet")
     dataset = from_path(['./testwav/', r'K:\dataa\OpenSinger'], params)
-    datasetv = from_path(['./test/', ], params,ifv=True)
-    md=md.load_from_checkpoint('./default/version_59/checkpoints/epoch=29-step=316457.ckpt',params=params)
-    trainer = pl.Trainer(max_epochs=100, logger=tensorboard, gpus=1, benchmark=True,num_sanity_val_steps=5,val_check_interval=params.valst,
-                        # resume_from_checkpoint='./default/version_57/checkpoints/epoch=23-step=253292.ckpt'
+    datasetv = from_path(['./test/', ], params, ifv=True)
+    md = md.load_from_checkpoint('./bignet/default/version_3/checkpoints/epoch=0-step=9999.ckpt', params=params)
+    trainer = pl.Trainer(max_epochs=100, logger=tensorboard, gpus=1, benchmark=True, num_sanity_val_steps=5,
+                         val_check_interval=params.valst,
+                         # resume_from_checkpoint='./default/version_57/checkpoints/epoch=23-step=253292.ckpt'
                          )
-    trainer.fit(model=md, train_dataloader=dataset,val_dataloaders=datasetv,)
+    trainer.fit(model=md, train_dataloader=dataset, val_dataloaders=datasetv, )

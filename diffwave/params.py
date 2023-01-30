@@ -70,7 +70,7 @@ params = AttrDict(
     lrcc=0.9,  # 酸碱率 衰减
     lrcl=[1, 1, 5, 20, 30],  # 衰减间隔
     frequency=1,  # 衰减器 频率
-    valst=5000,  # 验证
+    valst=2000,  # 验证
     loger='TB',  # TB or wandb
 
 )
