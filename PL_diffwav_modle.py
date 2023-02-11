@@ -295,7 +295,7 @@ class PL_diffwav(pl.LightningModule):
         return im
 
     def plot_mel(self, data, titles=None):
-        fig, axes = plt.subplots(len(data), 1, squeeze=False,figsize = (20, 20))
+        fig, axes = plt.subplots(len(data), 1, squeeze=False,figsize = (15, 10))
         if titles is None:
             titles = [None for i in range(len(data))]
         plt.tight_layout()
@@ -357,7 +357,7 @@ class PL_diffwav(pl.LightningModule):
 
         return loss
 
-    def predict(self, spectrogram=None, fast_sampling=True):
+    def predict(self, spectrogram=None, fast_sampling=False):
         # Lazy load model.
         device = spectrogram.device
 
@@ -422,11 +422,13 @@ if __name__ == "__main__":
     # torch.backends.cudnn.benchmark = True
     md = PL_diffwav(params)
     tensorboard = pl_loggers.TensorBoardLogger(save_dir="bignet")
-    dataset = from_path(['./testwav/', r'K:\dataa\OpenSinger'], params)
+    dataset = from_path([#'./testwav/',
+                         r'K:\dataa\OpenSinger'], params)
     datasetv = from_path(['./test/', ], params, ifv=True)
-    md = md.load_from_checkpoint('./bignet/default/version_3/checkpoints/epoch=0-step=9999.ckpt', params=params)
+    #md = md.load_from_checkpoint('./bignet/default/version_13/checkpoints/epoch=6-step=69797.ckpt', params=params)
     trainer = pl.Trainer(max_epochs=100, logger=tensorboard, gpus=1, benchmark=True, num_sanity_val_steps=5,
                          val_check_interval=params.valst,
-                         # resume_from_checkpoint='./default/version_57/checkpoints/epoch=23-step=253292.ckpt'
+                          resume_from_checkpoint='./bignet/default/version_20/checkpoints/epoch=79-step=838740.ckpt'
                          )
     trainer.fit(model=md, train_dataloader=dataset, val_dataloaders=datasetv, )
+
