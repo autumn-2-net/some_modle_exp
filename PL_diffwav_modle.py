@@ -426,9 +426,9 @@ if __name__ == "__main__":
                          r'K:\dataa\OpenSinger'], params)
     datasetv = from_path(['./test/', ], params, ifv=True)
     #md = md.load_from_checkpoint('./bignet/default/version_13/checkpoints/epoch=6-step=69797.ckpt', params=params)
-    trainer = pl.Trainer(max_epochs=100, logger=tensorboard, gpus=1, benchmark=True, num_sanity_val_steps=5,
+    trainer = pl.Trainer(max_epochs=160, logger=tensorboard, gpus=1, benchmark=True, num_sanity_val_steps=5,
                          val_check_interval=params.valst,
-                          resume_from_checkpoint='./bignet/default/version_20/checkpoints/epoch=79-step=838740.ckpt'
+                          resume_from_checkpoint='./bignet/default/version_24/checkpoints/epoch=113-step=984257.ckpt'
                          )
     trainer.fit(model=md, train_dataloader=dataset, val_dataloaders=datasetv, )
 
