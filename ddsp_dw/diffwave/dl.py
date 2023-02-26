@@ -9,10 +9,10 @@ import shutil
 
 
 
-def get_f0(path_srcfile,sampling_rate,f0_extractor,f0_min,f0_max,hop_length):
+def get_f0(path_srcfile,sampling_rate,f0_extractor,f0_min,f0_max,hop_length,melL):
     # extract f0 using parselmouth
     x, _ = librosa.load(path_srcfile, sr=sampling_rate)
-    mel =int(len(x)/hop_length)
+    mel =melL
     # print(mel)
     if f0_extractor == 'parselmouth':
         f0 = parselmouth.Sound(x, sampling_rate).to_pitch_ac(
@@ -65,6 +65,7 @@ def get_f0(path_srcfile,sampling_rate,f0_extractor,f0_min,f0_max,hop_length):
         # np.save(path_uvfile, uv)
     else:
         print('\n[Error] F0 extraction failed: ' + path_srcfile)
+        return None,None
         # os.makedirs(path_skipdir, exist_ok=True)
         # shutil.move(path_srcfile, path_skipdir)
         # print('This file has been moved to ' + os.path.join(path_skipdir, file))

@@ -25,25 +25,36 @@ from torch.utils.data.distributed import DistributedSampler
 
 
 class ConditionalDataset(torch.utils.data.Dataset):
-    def __init__(self, paths):
+    def __init__(self, paths,blcl='black.txt'):
         super().__init__()
         self.filenames = []
+        with open(blcl,'r',encoding='utf-8') as f:
+            ddddf=f.read().strip().split('\n')
         for path in paths:
             print(paths, path)
             self.filenames += glob(f'{path}/**/*.wav', recursive=True)
-
+        for i in self.filenames:
+            self.filenames.remove(i)
     def __len__(self):
         return len(self.filenames)
 
     def __getitem__(self, idx):
         audio_filename = self.filenames[idx]
         spec_filename = f'{audio_filename}.spec.npy'
+        f0_n = f'{audio_filename}.f0.npy'
+        uv_n = f'{audio_filename}.uv.npy'
         signal, _ = torchaudio.load(audio_filename)
         spectrogram = np.load(spec_filename)
+        uv=np.load(uv_n)
+        f0=np.load(f0_n)
+
+
         # return signal[0],spectrogram.T
         return {
             'audio': signal[0],
-            'spectrogram': spectrogram.T
+            'spectrogram': spectrogram.T,
+            'f0':f0,
+            'uv':uv
         }
 
 
@@ -97,10 +108,12 @@ class Collator:
                     del record['spectrogram']
                     del record['audio']
                     continue
-
+                #print(len(record['spectrogram']),len(record['f0']),len(record['uv']),len(record['spectrogram'])==len(record['f0']))
                 start = random.randint(0, record['spectrogram'].shape[0] - crop_mel_frames)
                 end = start + crop_mel_frames
                 record['spectrogram'] = record['spectrogram'][start:end].T
+                record['uv'] = record['uv'][start:end]
+                record['f0'] = record['f0'][start:end]
 
                 start *= samples_per_frame
                 end *= samples_per_frame
@@ -114,7 +127,11 @@ class Collator:
                 'spectrogram': None,
             }
         spectrogram = np.stack([record['spectrogram'] for record in minibatch if 'spectrogram' in record])
-        return torch.from_numpy(audio),torch.from_numpy(spectrogram)
+        fp=[record['f0'] for record in minibatch if 'f0' in record]
+        f0 = np.stack([record['f0'] for record in minibatch if 'f0' in record])
+        uv = np.stack([record['uv'] for record in minibatch if 'uv' in record])
+
+        return torch.from_numpy(audio),torch.from_numpy(spectrogram),torch.from_numpy(f0).type_as(torch.from_numpy(audio)),torch.from_numpy(uv).type_as(torch.from_numpy(audio))
         # return {
         #     'audio': torch.from_numpy(audio),
         #     'spectrogram': torch.from_numpy(spectrogram),
@@ -179,3 +196,22 @@ def from_gtzan(params, is_distributed=False):
         sampler=DistributedSampler(dataset) if is_distributed else None,
         pin_memory=True,
         drop_last=True)
+if __name__=='__main__':
+    dld=dataset = ConditionalDataset([ r'K:\dataa\OpenSinger'],'../black.txt')
+    #for i in dld:
+      #  print(i)
+    from params import params
+    dddl=torch.utils.data.DataLoader(
+        dataset,
+        batch_size=10,
+        collate_fn=Collator(params, False).collate,
+        shuffle=False,
+        # num_workers=os.cpu_count(),
+        num_workers=2,
+
+        sampler=DistributedSampler(dataset) if False else None,
+        pin_memory=False,
+        drop_last=False # flase hao hai shi?
+    )
+    for i in dddl:
+        print(i)

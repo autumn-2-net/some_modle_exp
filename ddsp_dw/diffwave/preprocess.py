@@ -91,9 +91,14 @@ def transform(filename):
     spectrogram=torch.log(torch.clamp(spectrogram, min=1e-5))
     # spectrogram = torch.clamp((spectrogram + 100) / 100, 0.0, 1.0)
     np.save(f'{filename}.spec.npy', spectrogram.cpu().numpy())
-    f0,uv=get_f0(path_srcfile=filename,hop_length=params.hop_samples,sampling_rate=params.sample_rate,f0_extractor=params.f0exp,f0_max=params.f0map,f0_min=params.f0min)
-    np.save(f'{filename}.f0.npy', f0)
-    np.save(f'{filename}.uv.npy', uv)
+    f0,uv=get_f0(path_srcfile=filename,hop_length=params.hop_samples,sampling_rate=params.sample_rate,f0_extractor=params.f0exp,f0_max=params.f0max,f0_min=params.f0min,melL=len(spectrogram.cpu().numpy().T))
+    if f0 is not None:
+        np.save(f'{filename}.f0.npy', f0)
+        np.save(f'{filename}.uv.npy', uv)
+    else:
+        with open('black.txt', 'a',encoding='utf-8') as f:
+            f.write(filename)
+            f.write('\n')
 
 
 
@@ -104,7 +109,7 @@ def main(args):
 
 def myuse(pathchs):
     filenames = glob(f'{pathchs}/**/*.wav', recursive=True)
-    with ProcessPoolExecutor(max_workers=6) as executor:
+    with ProcessPoolExecutor(max_workers=4) as executor:
         list(tqdm(executor.map(transform, filenames), desc='Preprocessing', total=len(filenames)))
 
 if __name__ == '__main__':
