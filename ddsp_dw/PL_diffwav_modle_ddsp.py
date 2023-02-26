@@ -407,7 +407,7 @@ class PL_diffwav(pl.LightningModule):
         spectrogram = accc['spectrogram']
         uv =batch[3]
         f0 = batch[2]
-        aaac, opo = self.predict(f0,spectrogram)
+        aaac, opo = self.predict(f0,spectrogram,fast_sampling=True)
         loss = self.loss_fn(aaac, audio)
 
         accc['gad'] = aaac
