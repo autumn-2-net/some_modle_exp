@@ -107,13 +107,28 @@ class Collator:
                 if len(record['spectrogram']) < crop_mel_frames:
                     del record['spectrogram']
                     del record['audio']
+                    del record['f0']
+                    del record['uv']
+                    #
                     continue
-                #print(len(record['spectrogram']),len(record['f0']),len(record['uv']),len(record['spectrogram'])==len(record['f0']))
-                start = random.randint(0, record['spectrogram'].shape[0] - crop_mel_frames)
+                # print(len(record['spectrogram']),len(record['f0']),len(record['uv']),len(record['spectrogram'])==len(record['f0']))
+                # if len(record['spectrogram'])!=len(record['f0']):
+                #     print('aaa')
+                #     del record['spectrogram']
+                #     del record['audio']
+                #     del record['f0']
+                #     del record['uv']
+                #     continue
+                #record['uv']=np.pad(record['uv'], (0, 10), mode='constant')
+                #record['f0'] = np.pad(record['f0'], (0, 10), mode='constant')
+
+                start = random.randint(0, record['spectrogram'].shape[0] - (crop_mel_frames+1))
                 end = start + crop_mel_frames
                 record['spectrogram'] = record['spectrogram'][start:end].T
                 record['uv'] = record['uv'][start:end]
                 record['f0'] = record['f0'][start:end]
+
+
 
                 start *= samples_per_frame
                 end *= samples_per_frame
@@ -127,7 +142,7 @@ class Collator:
                 'spectrogram': None,
             }
         spectrogram = np.stack([record['spectrogram'] for record in minibatch if 'spectrogram' in record])
-        fp=[record['f0'] for record in minibatch if 'f0' in record]
+        #fp=[record['f0'] for record in minibatch if 'f0' in record]
         f0 = np.stack([record['f0'] for record in minibatch if 'f0' in record])
         uv = np.stack([record['uv'] for record in minibatch if 'uv' in record])
 
@@ -198,8 +213,8 @@ def from_gtzan(params, is_distributed=False):
         drop_last=True)
 if __name__=='__main__':
     dld=dataset = ConditionalDataset([ r'K:\dataa\OpenSinger'],'../black.txt')
-    #for i in dld:
-      #  print(i)
+    # for i in dld:
+    #    pass
     from params import params
     dddl=torch.utils.data.DataLoader(
         dataset,
@@ -207,11 +222,11 @@ if __name__=='__main__':
         collate_fn=Collator(params, False).collate,
         shuffle=False,
         # num_workers=os.cpu_count(),
-        num_workers=2,
+        num_workers=0,
 
         sampler=DistributedSampler(dataset) if False else None,
         pin_memory=False,
         drop_last=False # flase hao hai shi?
     )
     for i in dddl:
-        print(i)
+        pass

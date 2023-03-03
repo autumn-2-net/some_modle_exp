@@ -9,9 +9,10 @@ if __name__ == '__main__':
     # myuse('./t')
 
     for i in [#'./t',
-             #'./test/',
+             './test/',
     #一般#    './ttt/',
      #         './testwav/',
               r'K:\dataa\OpenSinger'
               ]:
         myuse(i)
+

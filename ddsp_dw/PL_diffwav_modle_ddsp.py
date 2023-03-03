@@ -290,7 +290,7 @@ class PL_diffwav(pl.LightningModule):
         if torch.isnan(losscc):
             raise ValueError(' [x] nan loss ')
         loss = self.loss_fn(noise, predicted.squeeze(1))
-        mix_loss=(loss+losscc)/2
+        mix_loss=(loss*4+losscc)/5
         if self.is_master:
             if self.global_step % 50 == 0:
                 if self.global_step!=0:
