@@ -184,13 +184,15 @@ def from_path(data_dirs, params, is_distributed=False,ifv=False):
     else:  # with condition
         dataset = ConditionalDataset(data_dirs)
     bs=params.batch_size
+    dhhh=True
     if ifv:
         bs=1
+        dhhh=False
     return torch.utils.data.DataLoader(
         dataset,
         batch_size=bs,
         collate_fn=Collator(params,ifv).collate,
-        shuffle=not is_distributed,
+        shuffle=dhhh,
         # num_workers=os.cpu_count(),
         num_workers=params.num_cpu,
 

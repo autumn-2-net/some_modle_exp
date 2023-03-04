@@ -136,14 +136,15 @@ class ResidualBlock(nn.Module):  # 残差块吧
         self.dilated_conv = Conv1d(residual_channels, 2 * residual_channels, 3, padding=dilation, dilation=dilation)
         self.diffusion_projection = Linear(512, residual_channels)
         if not uncond:  # conditional model
-            self.conditioner_projection = Conv1d(1, 2 * residual_channels, 513,padding=256)  # ?????????????? 傻了改错了
+            self.conditioner_projection = Conv1d(1, 2 * residual_channels, 257,padding=128)  # ?????????????? 傻了改错了
+            self.conditioner_mel = Conv1d(n_mels, 2 * residual_channels, 1, )
             # todo
         else:  # unconditional model
             self.conditioner_projection = None
 
         self.output_projection = Conv1d(residual_channels, 2 * residual_channels, 1)
 
-    def forward(self, x, diffusion_step, conditioner=None):
+    def forward(self, x, diffusion_step,mel, conditioner=None):
         assert (conditioner is None and self.conditioner_projection is None) or \
                (conditioner is not None and self.conditioner_projection is not None)
 
@@ -152,7 +153,7 @@ class ResidualBlock(nn.Module):  # 残差块吧
         if self.conditioner_projection is None:  # using a unconditional model
             y = self.dilated_conv(y)
         else:
-            conditioner = self.conditioner_projection(conditioner)
+            conditioner = self.conditioner_projection(conditioner)+ self.conditioner_mel(mel)
             xcxc = self.dilated_conv(y)
             y = xcxc + conditioner
 
@@ -186,7 +187,7 @@ class DiffWave(nn.Module):
         nn.init.zeros_(self.output_projection.weight)
 
 
-    def forward(self, audio, diffusion_step, spectrogram=None):
+    def forward(self, audio, diffusion_step, mel,spectrogram=None):
         assert (spectrogram is None and self.spectrogram_upsampler is None) or \
                (spectrogram is not None and self.spectrogram_upsampler is not None)
         x = audio.unsqueeze(1)
@@ -194,12 +195,12 @@ class DiffWave(nn.Module):
         x = F.relu(x)
 
         diffusion_step = self.diffusion_embedding(diffusion_step)
-        # if self.spectrogram_upsampler:  # use conditional model
-        #     spectrogram = self.spectrogram_upsampler(spectrogram)
+        if self.spectrogram_upsampler:  # use conditional model
+            mel = self.spectrogram_upsampler(mel)
 
         skip = None
         for layer in self.residual_layers:
-            x, skip_connection = layer(x, diffusion_step, spectrogram)
+            x, skip_connection = layer(x, diffusion_step, mel,spectrogram)
             skip = skip_connection if skip is None else skip_connection + skip
 
         x = skip / sqrt(len(self.residual_layers))
@@ -226,6 +227,7 @@ class PL_diffwav(pl.LightningModule):
         self.is_master = True
         self.ddsp=ddsp_adp(args=argss)
         self.args = argss
+        args=argss
 
         beta = np.array(self.params.noise_schedule)
         noise_level = np.cumprod(1 - beta)
@@ -243,7 +245,7 @@ class PL_diffwav(pl.LightningModule):
     def forward(self, audio, diffusion_step,f0, spectrogram=None):
         wavv,s_h=self.ddsp(spectrogram,f0,)
         wavv=wavv.type_as(audio)
-        return self.diffwav(audio, diffusion_step, wavv.unsqueeze(
+        return self.diffwav(audio, diffusion_step,spectrogram, wavv.unsqueeze(
                     1)),wavv,s_h
 
     def on_before_zero_grad(self, optimizer):
@@ -503,7 +505,7 @@ if __name__ == "__main__":
     # torch.backends.cudnn.benchmark = True
     args = utils.load_config('./configs/combsub.yaml')
     md = PL_diffwav(params,argss=args)
-    tensorboard = pl_loggers.TensorBoardLogger(save_dir="bignet_mix")
+    tensorboard = pl_loggers.TensorBoardLogger(save_dir="bignet_mix_mel")
     dataset = from_path([#'./testwav/',
                          r'K:\dataa\OpenSinger'], params)
     datasetv = from_path(['./test/', ], params, ifv=True)
