@@ -510,7 +510,7 @@ if __name__ == "__main__":
     #md = md.load_from_checkpoint('./bignet/default/version_13/checkpoints/epoch=6-step=69797.ckpt', params=params)
     trainer = pl.Trainer(max_epochs=250, logger=tensorboard, gpus=1, benchmark=True, num_sanity_val_steps=1,
                          val_check_interval=params.valst,
-                         resume_from_checkpoint='./bignet/default/version_12/checkpoints/epoch=21-step=47059.ckpt'
+                        # resume_from_checkpoint='./bignet/default/version_12/checkpoints/epoch=21-step=47059.ckpt'
                          )
     trainer.fit(model=md, train_dataloader=dataset, val_dataloaders=datasetv, )
 
