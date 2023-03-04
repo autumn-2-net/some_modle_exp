@@ -136,7 +136,8 @@ class ResidualBlock(nn.Module):  # 残差块吧
         self.dilated_conv = Conv1d(residual_channels, 2 * residual_channels, 3, padding=dilation, dilation=dilation)
         self.diffusion_projection = Linear(512, residual_channels)
         if not uncond:  # conditional model
-            self.conditioner_projection = Conv1d(1, 2 * residual_channels, 1)  # ??????????????
+            self.conditioner_projection = Conv1d(1, 2 * residual_channels, 513,padding=256)  # ?????????????? 傻了改错了
+            # todo
         else:  # unconditional model
             self.conditioner_projection = None
 
@@ -167,7 +168,8 @@ class DiffWave(nn.Module):
     def __init__(self, params):
         super().__init__()
         self.params = params
-        self.input_projection = Conv1d(1, params.residual_channels, 513,padding=256)
+        self.input_projection = Conv1d(1, params.residual_channels, 1)
+
         self.diffusion_embedding = DiffusionEmbedding(len(params.noise_schedule))
         if self.params.unconditional:  # use unconditional model  #不知道干什么的
             self.spectrogram_upsampler = None
