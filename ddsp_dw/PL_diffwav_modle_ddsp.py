@@ -507,12 +507,12 @@ if __name__ == "__main__":
     md = PL_diffwav(params,argss=args)
     tensorboard = pl_loggers.TensorBoardLogger(save_dir="bignet_mix_mel")
     dataset = from_path([#'./testwav/',
-                         r'K:\dataa\OpenSinger'], params)
+                         r'K:\dataa\OpenSinger',r'C:\Users\autumn\Desktop\poject_all\DiffSinger\data\raw\opencpop\segments\wavs'], params)
     datasetv = from_path(['./test/', ], params, ifv=True)
     #md = md.load_from_checkpoint('./bignet/default/version_13/checkpoints/epoch=6-step=69797.ckpt', params=params)
     trainer = pl.Trainer(max_epochs=250, logger=tensorboard, gpus=1, benchmark=True, num_sanity_val_steps=1,
                          val_check_interval=params.valst,
-                        # resume_from_checkpoint='./bignet/default/version_12/checkpoints/epoch=21-step=47059.ckpt'
+                        resume_from_checkpoint='./bignet_mix_mel/default/version_1/checkpoints/epoch=4-step=10611.ckpt'
                          )
     trainer.fit(model=md, train_dataloader=dataset, val_dataloaders=datasetv, )
 
