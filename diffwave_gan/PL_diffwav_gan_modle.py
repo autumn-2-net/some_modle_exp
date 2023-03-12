@@ -386,7 +386,7 @@ class WavenetDiscriminator(nn.Module):
             torch.cat([x_t_prevs, x_ts], dim=-1).transpose(1, 2)
         )
         x = F.relu(x)
-        diffusion_step = self.diffusion_embedding(t).unsqueeze(-1)
+        diffusion_step = self.diffusion_embedding(t)
 
         skip = None
         x_con=x
@@ -542,7 +542,7 @@ class PL_diffwav(pl.LightningModule):
                 # na_1 = na
                 nnc.append(na.unsqueeze(0))
         Gna_1 = torch.cat(nnc, dim=0)
-        if self.global_step>10000:
+        if self.global_step>10:
             cond_featsF, uncond_featsF = self.D(noisy_audio.unsqueeze(1), Gna_1.unsqueeze(1).detach(), t)
             cond_featsT, uncond_featsT = self.D(noisy_audio.unsqueeze(1), na_1.unsqueeze(1).detach(), t)
 
