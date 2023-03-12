@@ -320,7 +320,116 @@ class DiffWave(nn.Module):
         x = F.relu(x)
         x = self.output_projection(x)
         return x
+class DResidualBlock(nn.Module):  # 残差块吧
+    def __init__(self, n_mels, residual_channels, dilation, uncond=False):
+        '''
+        :param n_mels: inplanes of conv1x1 for spectrogram conditional
+        :param residual_channels: audio conv
+        :param dilation: audio conv dilation
+        :param uncond: disable spectrogram conditional
+        '''
+        super().__init__()
+        self.dilated_conv = Conv1d(residual_channels, 2 * residual_channels, 3, padding=dilation, dilation=dilation)
+        self.diffusion_projection = Linear(512, residual_channels)
 
+
+        self.output_projection = Conv1d(residual_channels, 2 * residual_channels, 1)
+
+    def forward(self, x, diffusion_step, conditioner):
+        # assert (conditioner is None and self.conditioner_projection is None) or \
+        #        (conditioner is not None and self.conditioner_projection is not None)
+
+        diffusion_step = self.diffusion_projection(diffusion_step).unsqueeze(-1)
+        if conditioner:
+            y = x + diffusion_step
+        else:
+            y=x
+
+        y = self.dilated_conv(y)
+
+
+        gate, filter = torch.chunk(y, 2, dim=1)
+        y = torch.sigmoid(gate) * torch.tanh(filter)
+
+        y = self.output_projection(y)
+        residual, skip = torch.chunk(y, 2, dim=1)
+        return (x + residual) / sqrt(2.0), skip
+class WavenetDiscriminator(nn.Module):
+    def __init__(self,T_len,residual_channels,lay=10,ducycle=10):
+        super().__init__()
+        self.residual_layers_con = nn.ModuleList([
+            DResidualBlock(0, residual_channels, 2 ** (i % ducycle),
+                          )
+            for i in range(lay)
+        ])
+        self.residual_layers_uncon = nn.ModuleList([
+            DResidualBlock(0, residual_channels, 2 ** (i % ducycle),
+                           )
+            for i in range(lay)
+        ])
+        self.diffusion_embedding = DiffusionEmbedding(T_len)
+        self.input_projection = Conv1d(2, residual_channels, 1)
+        self.skip_projection_con = Conv1d(residual_channels, residual_channels, 1)
+        self.output_projection_con = Conv1d(residual_channels, 1, 1)
+        self.skip_projection_uncon = Conv1d(residual_channels, residual_channels, 1)
+        self.output_projection_uncon = Conv1d(residual_channels, 1, 1)
+    def forward(self, x_ts, x_t_prevs, t):
+        """
+        x_ts -- [B, T, H]
+        x_t_prevs -- [B, T, H]
+        s -- [B, H]
+        t -- [B]
+        """
+        x_t_prevs=x_t_prevs.transpose(1, 2)
+        x_ts=x_ts.transpose(1, 2)
+        x = self.input_projection(
+            torch.cat([x_t_prevs, x_ts], dim=-1).transpose(1, 2)
+        )
+        x = F.relu(x)
+        diffusion_step = self.diffusion_embedding(t).unsqueeze(-1)
+
+        skip = None
+        x_con=x
+        for layer in self.residual_layers_con:
+            x_con, skip_connection = layer(x_con, diffusion_step, True)
+            skip = skip_connection if skip is None else skip_connection + skip
+
+        x_con = skip / sqrt(len(self.residual_layers_con))
+        x_con = self.skip_projection_con(x_con)
+        x_con = F.relu(x_con)
+        x_con = self.output_projection_con(x_con)
+
+        skip = None
+        x_uncon = x
+        for layer in self.residual_layers_uncon:
+            x_uncon, skip_connection = layer(x_uncon, diffusion_step, False)
+            skip = skip_connection if skip is None else skip_connection + skip
+
+        x_uncon = skip / sqrt(len(self.residual_layers_uncon))
+        x_uncon = self.skip_projection_con(x_uncon)
+        x_uncon = F.relu(x_uncon)
+        x_uncon = self.output_projection_con(x_uncon)
+        return [x_con],[x_uncon]
+
+
+        # cond_feats = []
+        # uncond_feats = []
+        # for layer in self.conv_block:
+        #     x = F.leaky_relu(layer(x), 0.2)
+        #     cond_feats.append(x)
+        #     uncond_feats.append(x)
+        #
+        # x_cond = (x + diffusion_step)
+        # x_uncond = x
+        #
+        # for layer in self.cond_conv_block:
+        #     x_cond = F.leaky_relu(layer(x_cond), 0.2)
+        #     cond_feats.append(x_cond)
+        #
+        # for layer in self.uncond_conv_block:
+        #     x_uncond = F.leaky_relu(layer(x_uncond), 0.2)
+        #     uncond_feats.append(x_uncond)
+        # return cond_feats, uncond_feats
 
 class PL_diffwav(pl.LightningModule):
     def __init__(self, params):
@@ -350,7 +459,8 @@ class PL_diffwav(pl.LightningModule):
         self.lrc = self.params.learning_rate
         self.val_loss = 0
         self.valc = []
-        self.D=JCUDiscriminator(len(self.params.noise_schedule))
+        # self.D=JCUDiscriminator(len(self.params.noise_schedule))
+        self.D = WavenetDiscriminator(len(self.params.noise_schedule),16)
         self.automatic_optimization = False
 
     def forward(self, audio, diffusion_step, spectrogram=None):
@@ -432,25 +542,31 @@ class PL_diffwav(pl.LightningModule):
                 # na_1 = na
                 nnc.append(na.unsqueeze(0))
         Gna_1 = torch.cat(nnc, dim=0)
-        cond_featsF, uncond_featsF = self.D(noisy_audio.unsqueeze(1), Gna_1.unsqueeze(1).detach(), t)
-        cond_featsT, uncond_featsT = self.D(noisy_audio.unsqueeze(1), na_1.unsqueeze(1).detach(), t)
+        if self.global_step>10000:
+            cond_featsF, uncond_featsF = self.D(noisy_audio.unsqueeze(1), Gna_1.unsqueeze(1).detach(), t)
+            cond_featsT, uncond_featsT = self.D(noisy_audio.unsqueeze(1), na_1.unsqueeze(1).detach(), t)
 
 
 
-        F_loss_con=F.mse_loss(cond_featsF[-1], torch.zeros_like(cond_featsF[-1]))
-        F_loss_uncon = F.mse_loss(uncond_featsF[-1], torch.zeros_like(uncond_featsF[-1]))
+            F_loss_con=F.mse_loss(cond_featsF[-1], torch.zeros_like(cond_featsF[-1]))
+            F_loss_uncon = F.mse_loss(uncond_featsF[-1], torch.zeros_like(uncond_featsF[-1]))
 
-        T_loss_con = F.mse_loss(cond_featsT[-1], torch.ones_like(cond_featsT[-1]))
-        T_loss_uncon = F.mse_loss(uncond_featsT[-1], torch.ones_like(uncond_featsT[-1]))
+            T_loss_con = F.mse_loss(cond_featsT[-1], torch.ones_like(cond_featsT[-1]))
+            T_loss_uncon = F.mse_loss(uncond_featsT[-1], torch.ones_like(uncond_featsT[-1]))
 
-        D_mix_loss=(F_loss_con+F_loss_uncon+T_loss_con+T_loss_uncon)/4
-        ################################
-        # D优化
-        ####################################
-        opt_d.zero_grad()
-        self.manual_backward(D_mix_loss)
-        opt_d.step()
+            D_mix_loss=(F_loss_con+F_loss_uncon+T_loss_con+T_loss_uncon)/4
+            ################################
+            # D优化
+            ####################################
+            opt_d.zero_grad()
+            self.manual_backward(D_mix_loss)
+            opt_d.step()
         ############################
+        else:
+            F_loss_con=0
+            F_loss_uncon=0
+            T_loss_con=0
+            T_loss_uncon=0
         #G Train
         ##############
         Gcond_featsF, Guncond_featsF = self.D(noisy_audio.unsqueeze(1), Gna_1.unsqueeze(1), t)
