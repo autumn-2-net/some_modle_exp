@@ -53,7 +53,7 @@ params = AttrDict(
 
     # Model params
     residual_layers=30,
-    residual_channels=128,
+    residual_channels=64,
     dilation_cycle_length=10,
     unconditional=False,
     noise_schedule=np.linspace(1e-4, 0.05, 50).tolist(),  # 层

@@ -53,10 +53,10 @@ params = AttrDict(
 
     # Model params
     residual_layers=30,
-    residual_channels=128,
+    residual_channels=64,
     dilation_cycle_length=10,
     unconditional=False,
-    noise_schedule=np.linspace(1e-4, 0.05, 50).tolist(),  # 层
+    noise_schedule=np.linspace(1e-4, 0.05, 500).tolist(),  # 层
     inference_noise_schedule=[0.0001, 0.001, 0.01, 0.05, 0.2, 0.5],  # 加速
     num_cpu=4,  # dl进程
     drop_last=True,  # 丢批
@@ -70,7 +70,7 @@ params = AttrDict(
     lrcc=0.9,  # 酸碱率 衰减
     lrcl=[1, 1, 5, 20, 30],  # 衰减间隔
     frequency=1,  # 衰减器 频率
-    valst=2000,  # 验证
+    valst=500,  # 验证
     loger='TB',  # TB or wandb
 
 )

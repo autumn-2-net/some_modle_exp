@@ -121,8 +121,164 @@ class ResidualBlock(nn.Module):  # 残差块吧
         y = self.output_projection(y)
         residual, skip = torch.chunk(y, 2, dim=1)
         return (x + residual) / sqrt(2.0), skip
+class Mish(nn.Module):
+    def forward(self, x):
+        return x * torch.tanh(F.softplus(x))
 
 
+class LinearNorm(nn.Module):
+    """ LinearNorm Projection """
+
+    def __init__(self, in_features, out_features, bias=False):
+        super(LinearNorm, self).__init__()
+        self.linear = nn.Linear(in_features, out_features, bias)
+
+        nn.init.xavier_uniform_(self.linear.weight)
+        if bias:
+            nn.init.constant_(self.linear.bias, 0.0)
+
+    def forward(self, x):
+        x = self.linear(x)
+        return x
+
+
+class ConvNorm(nn.Module):
+    """ 1D Convolution """
+
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        kernel_size=1,
+        stride=1,
+        padding=None,
+        dilation=1,
+        bias=True,
+        w_init_gain="linear",
+    ):
+        super(ConvNorm, self).__init__()
+
+        if padding is None:
+            assert kernel_size % 2 == 1
+            padding = int(dilation * (kernel_size - 1) / 2)
+
+        self.conv = nn.Conv1d(
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
+            bias=bias,
+        )
+        nn.init.kaiming_normal_(self.conv.weight)
+
+    def forward(self, signal):
+        conv_signal = self.conv(signal)
+
+        return conv_signal
+
+class JCUDiscriminator(nn.Module):
+    """ JCU Discriminator """
+
+    def __init__(self, T ):
+        super(JCUDiscriminator, self).__init__()
+
+        n_mel_channels = 1
+        residual_channels = T
+        n_layer = 3
+        n_uncond_layer = 2
+        n_cond_layer = 2
+        n_channels = [64,128,512,128,1]
+        kernel_sizes = [128,32,15,5,3]
+        strides = [32,4,6,1,1]
+        p=[65,33,14,0,0]
+
+
+        self.input_projection = LinearNorm(2 * n_mel_channels, 2 * n_mel_channels)
+        self.diffusion_embedding = DiffusionEmbedding(residual_channels)
+        # self.mlp = nn.Sequential(
+        #     LinearNorm(residual_channels, residual_channels * 4),
+        #     Mish(),
+        #     LinearNorm(residual_channels * 4, n_channels[n_layer-1]),
+        # )
+
+        self.conv_block = nn.ModuleList(
+            [
+                ConvNorm(
+                    n_channels[i-1] if i != 0 else 2 * n_mel_channels,
+                    n_channels[i],
+                    kernel_size=kernel_sizes[i],
+                    stride=strides[i],
+                    dilation=1,padding=p[i]
+                )
+                for i in range(n_layer)
+            ]
+        )
+        self.uncond_conv_block = nn.ModuleList(
+            [
+                ConvNorm(
+                    n_channels[i-1],
+                    n_channels[i],
+                    kernel_size=kernel_sizes[i],
+                    stride=strides[i],
+                    dilation=1,padding=p[i]
+                )
+                for i in range(n_layer, n_layer + n_uncond_layer)
+            ]
+        )
+        self.cond_conv_block = nn.ModuleList(
+            [
+                ConvNorm(
+                    n_channels[i-1],
+                    n_channels[i],
+                    kernel_size=kernel_sizes[i],
+                    stride=strides[i],
+                    dilation=1,padding=p[i]
+                )
+                for i in range(n_layer, n_layer + n_cond_layer)
+            ]
+        )
+        self.apply(self.weights_init)
+
+    def weights_init(self, m):
+        classname = m.__class__.__name__
+        if classname.find("ConvNorm") != -1:
+            m.conv.weight.data.normal_(0.0, 0.02)
+
+    def forward(self, x_ts, x_t_prevs, t):
+        """
+        x_ts -- [B, T, H]
+        x_t_prevs -- [B, T, H]
+        s -- [B, H]
+        t -- [B]
+        """
+        x_t_prevs=x_t_prevs.transpose(1, 2)
+        x_ts=x_ts.transpose(1, 2)
+        x = self.input_projection(
+            torch.cat([x_t_prevs, x_ts], dim=-1)
+        ).transpose(1, 2)
+        diffusion_step = self.diffusion_embedding(t).unsqueeze(-1)
+
+
+        cond_feats = []
+        uncond_feats = []
+        for layer in self.conv_block:
+            x = F.leaky_relu(layer(x), 0.2)
+            cond_feats.append(x)
+            uncond_feats.append(x)
+
+        x_cond = (x + diffusion_step)
+        x_uncond = x
+
+        for layer in self.cond_conv_block:
+            x_cond = F.leaky_relu(layer(x_cond), 0.2)
+            cond_feats.append(x_cond)
+
+        for layer in self.uncond_conv_block:
+            x_uncond = F.leaky_relu(layer(x_uncond), 0.2)
+            uncond_feats.append(x_uncond)
+        return cond_feats, uncond_feats
 class DiffWave(nn.Module):
     def __init__(self, params):
         super().__init__()
@@ -185,6 +341,8 @@ class PL_diffwav(pl.LightningModule):
         beta = np.array(self.params.noise_schedule)
         noise_level = np.cumprod(1 - beta)
         noise_level = torch.tensor(noise_level.astype(np.float32))
+        self.alpha = torch.tensor((1 - beta).astype(np.float32))
+        self.beta=torch.tensor(beta.astype(np.float32))
         self.noise_level = noise_level
         self.loss_fn = nn.L1Loss()
         self.summary_writer = None
@@ -192,6 +350,8 @@ class PL_diffwav(pl.LightningModule):
         self.lrc = self.params.learning_rate
         self.val_loss = 0
         self.valc = []
+        self.D=JCUDiscriminator(len(self.params.noise_schedule))
+        self.automatic_optimization = False
 
     def forward(self, audio, diffusion_step, spectrogram=None):
 
@@ -201,7 +361,7 @@ class PL_diffwav(pl.LightningModule):
         # print(optimizer.state_dict()['param_groups'][0]['lr'],self.global_step)
         self.lrc = optimizer.state_dict()['param_groups'][0]['lr']
 
-    def training_step(self, batch, batch_idx):
+    def training_step(self, batch, batch_idx,):
         # training_step defines the train loop.
         # it is independent of forward
         # x, y = batch
@@ -214,6 +374,7 @@ class PL_diffwav(pl.LightningModule):
         # return loss
         # self.step = self.step+1
         pass
+        opt_g, opt_d=self.optimizers()
         accc = {
             'audio': batch[0],
             'spectrogram': batch[1]
@@ -225,22 +386,112 @@ class PL_diffwav(pl.LightningModule):
         N, T = audio.shape
         device = audio.device
         self.noise_level = self.noise_level.to(device)
-
+        self.alpha = self.alpha.to(device)
+        self.beta = self.beta.to(device)
         t = torch.randint(0, len(self.params.noise_schedule), [N], device=audio.device)
         noise_scale = self.noise_level[t].unsqueeze(1)
         noise_scale_sqrt = noise_scale ** 0.5
         noise = torch.randn_like(audio)
         noisy_audio = noise_scale_sqrt * audio + (1.0 - noise_scale) ** 0.5 * noise
 
+
+
+        ####################
+        #T D
+        ####################
+        nns=[]
+        noise_scale1 = self.noise_level[t - 1].unsqueeze(1)
+        noise_scale_sqrt1 = noise_scale ** 0.5
+        for idx,i in enumerate(t):
+            if i>0:
+                # ccc=audio[idx]
+                na_1 = noise_scale_sqrt1[idx] * audio[idx] + (1.0 - noise_scale1[idx]) ** 0.5 * noise[idx]
+                nns.append(na_1.unsqueeze(0))
+            else:
+                na_1=audio[idx]
+                nns.append(na_1.unsqueeze(0))
+        na_1=torch.cat(nns, dim=0)
+
         predicted = self.forward(noisy_audio, t, spectrogram)
         loss = self.loss_fn(noise, predicted.squeeze(1))
+        nnc=[]
+        for idx, i in enumerate(t):
+            c1 = 1 / self.alpha[i] ** 0.5
+            c2 = self.beta[i] / (1 - self.noise_level[i]) ** 0.5
+            # aas=predicted.squeeze(1)
+            na = c1 * (noisy_audio[idx] - c2 *( predicted.squeeze(1)[idx]))
+            if i > 0:
+                noise = torch.randn_like(audio[idx])
+                sigma = ((1.0 - self.noise_level[i - 1]) / (1.0 - self.noise_level[i]) * self.beta[i]) ** 0.5
+                na += sigma * noise
+                nnc.append(na.unsqueeze(0))
+
+
+
+            else:
+                # na_1 = na
+                nnc.append(na.unsqueeze(0))
+        Gna_1 = torch.cat(nnc, dim=0)
+        cond_featsF, uncond_featsF = self.D(noisy_audio.unsqueeze(1), Gna_1.unsqueeze(1).detach(), t)
+        cond_featsT, uncond_featsT = self.D(noisy_audio.unsqueeze(1), na_1.unsqueeze(1).detach(), t)
+
+
+
+        F_loss_con=F.mse_loss(cond_featsF[-1], torch.zeros_like(cond_featsF[-1]))
+        F_loss_uncon = F.mse_loss(uncond_featsF[-1], torch.zeros_like(uncond_featsF[-1]))
+
+        T_loss_con = F.mse_loss(cond_featsT[-1], torch.ones_like(cond_featsT[-1]))
+        T_loss_uncon = F.mse_loss(uncond_featsT[-1], torch.ones_like(uncond_featsT[-1]))
+
+        D_mix_loss=(F_loss_con+F_loss_uncon+T_loss_con+T_loss_uncon)/4
+        ################################
+        # D优化
+        ####################################
+        opt_d.zero_grad()
+        self.manual_backward(D_mix_loss)
+        opt_d.step()
+        ############################
+        #G Train
+        ##############
+        Gcond_featsF, Guncond_featsF = self.D(noisy_audio.unsqueeze(1), Gna_1.unsqueeze(1), t)
+        G_loss_con = F.mse_loss(Gcond_featsF[-1], torch.ones_like(Gcond_featsF[-1]))
+        G_loss_uncon = F.mse_loss(Guncond_featsF[-1], torch.ones_like(Guncond_featsF[-1]))
+
+        G_loss=(loss+(G_loss_con+G_loss_uncon)/2)
+
+
+        opt_g.zero_grad()
+        self.manual_backward(G_loss)
+        opt_g.step()
+
         if self.is_master:
-            if self.global_step % 50 == 0:
-                if self.global_step!=0:
+            if self.global_step % 10 == 0:
+                if self.global_step != 0:
+                    self._write_summary(self.global_step, accc, loss,DTloss_unc=T_loss_uncon,DFloss_unc=F_loss_uncon,DFloss_c=F_loss_con,DTloss_c=T_loss_con,
+                                        Gdloss_c=G_loss_con,Gdloss_unc=G_loss_uncon
+                                        )
 
-                    self._write_summary(self.global_step, accc, loss)
 
-        return loss
+
+        # return loss
+        # if optimizer_idx == 0:
+        #
+        #
+        #     predicted = self.forward(noisy_audio, t, spectrogram)
+        #     loss = self.loss_fn(noise, predicted.squeeze(1))
+        #     c1 = 1 / self.alpha[t] ** 0.5
+        #     c2 = self.beta[t] / (1 - self.noise_level[t]) ** 0.5
+        #     na = c1 * (noisy_audio - c2 * predicted.squeeze(1))
+        #     if t > 0:
+        #         noise = torch.randn_like(audio)
+        #         sigma = ((1.0 - self.noise_level[t - 1]) / (1.0 - self.noise_level[t]) * self.beta[t]) ** 0.5
+        #         na += sigma * noise
+        #     cond_feats, uncond_feats=  self.D(noisy_audio,na,t)
+        #
+        #     if self.is_master:
+        #         if self.global_step % 50 == 0:
+        #             if self.global_step != 0:
+        #                 self._write_summary(self.global_step, accc, loss)
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.params.learning_rate)
@@ -252,17 +503,20 @@ class PL_diffwav(pl.LightningModule):
             "monitor": "val_loss",  # ReduceLROnPlateau的监控指标
             "strict": False  # 如果没有monitor，是否中断训练
         }
-        return {"optimizer": optimizer,
-                # "lr_scheduler": lt
-                }
+        opt_g = torch.optim.AdamW(self.diffwav.parameters(), lr=self.params.learning_rate)
+        opt_d = torch.optim.AdamW(self.D.parameters(), lr=self.params.learning_rate)
+        return [opt_g, opt_d], []
+        # return {"optimizer": optimizer,
+        #         # "lr_scheduler": lt
+        #         }
 
     def on_after_backward(self):
         self.grad_norm = nn.utils.clip_grad_norm_(self.parameters(), self.params.max_grad_norm or 1e9)
 
     # train
 
-    def _write_summary(self, step, features, loss):  # log 器
-        tensorboard = self.logger.experiment
+    def _write_summary(self, step, features, loss,DTloss_unc,DTloss_c,DFloss_unc,DFloss_c,Gdloss_unc,Gdloss_c):  # log 器
+        # tensorboard = self.logger.experiment
         # writer = tensorboard.SummaryWriter
         writer = SummaryWriter("./mdsr_1000/", purge_step=step)
         # writer = tensorboard
@@ -277,6 +531,13 @@ class PL_diffwav(pl.LightningModule):
             # writer.add_figure('val_' + str(self.global_step) + '/spectrogram', mel, idx)
             writer.add_figure('feature/spectrogram',mel , step)
         writer.add_scalar('train/loss', loss, step)
+        writer.add_scalar('train/DTloss_unc', DTloss_unc, step)
+        writer.add_scalar('train/DTloss_c', DTloss_c, step)
+        writer.add_scalar('train/DFloss_unc', DFloss_unc, step)
+        writer.add_scalar('train/DFloss_c', DFloss_c, step)
+        writer.add_scalar('train/Gdloss_unc', Gdloss_unc, step)
+        writer.add_scalar('train/Gdloss_c', Gdloss_c, step)
+
         writer.add_scalar('train/grad_norm', self.grad_norm, step)
         writer.add_scalar('train/lr', self.lrc, step)
         writer.flush()
