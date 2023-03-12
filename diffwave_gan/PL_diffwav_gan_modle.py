@@ -460,7 +460,7 @@ class PL_diffwav(pl.LightningModule):
         self.val_loss = 0
         self.valc = []
         # self.D=JCUDiscriminator(len(self.params.noise_schedule))
-        self.D = WavenetDiscriminator(len(self.params.noise_schedule),16)
+        self.D = WavenetDiscriminator(len(self.params.noise_schedule),32)
         self.automatic_optimization = False
 
     def forward(self, audio, diffusion_step, spectrogram=None):
@@ -581,9 +581,9 @@ class PL_diffwav(pl.LightningModule):
         opt_g.step()
 
         if self.is_master:
-            if self.global_step % 10 == 0:
-                if self.global_step != 0:
-                    self._write_summary(self.global_step, accc, loss,DTloss_unc=T_loss_uncon,DFloss_unc=F_loss_uncon,DFloss_c=F_loss_con,DTloss_c=T_loss_con,
+            if self.global_step % 10 == 0 or (self.global_step-1) % 10 == 0:
+
+                self._write_summary(self.global_step, accc, loss,DTloss_unc=T_loss_uncon,DFloss_unc=F_loss_uncon,DFloss_c=F_loss_con,DTloss_c=T_loss_con,
                                         Gdloss_c=G_loss_con,Gdloss_unc=G_loss_uncon
                                         )
 
