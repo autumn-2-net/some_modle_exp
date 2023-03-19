@@ -542,7 +542,7 @@ class PL_diffwav(pl.LightningModule):
                 # na_1 = na
                 nnc.append(na.unsqueeze(0))
         Gna_1 = torch.cat(nnc, dim=0)
-        if self.global_step>10:
+        if self.global_step>1:
             cond_featsF, uncond_featsF = self.D(noisy_audio.unsqueeze(1), Gna_1.unsqueeze(1).detach(), t)
             cond_featsT, uncond_featsT = self.D(noisy_audio.unsqueeze(1), na_1.unsqueeze(1).detach(), t)
 
@@ -569,9 +569,13 @@ class PL_diffwav(pl.LightningModule):
             T_loss_uncon=0
         #G Train
         ##############
-        Gcond_featsF, Guncond_featsF = self.D(noisy_audio.unsqueeze(1), Gna_1.unsqueeze(1), t)
-        G_loss_con = F.mse_loss(Gcond_featsF[-1], torch.ones_like(Gcond_featsF[-1]))
-        G_loss_uncon = F.mse_loss(Guncond_featsF[-1], torch.ones_like(Guncond_featsF[-1]))
+        if self.global_step > 1000:
+            Gcond_featsF, Guncond_featsF = self.D(noisy_audio.unsqueeze(1), Gna_1.unsqueeze(1), t)
+            G_loss_con = F.mse_loss(Gcond_featsF[-1], torch.ones_like(Gcond_featsF[-1]))
+            G_loss_uncon = F.mse_loss(Guncond_featsF[-1], torch.ones_like(Guncond_featsF[-1]))
+        else:
+            G_loss_con=0
+            G_loss_uncon=0
 
         G_loss=(loss+(G_loss_con+G_loss_uncon)/2)
 
@@ -796,8 +800,8 @@ if __name__ == "__main__":
     from diffwave.dataset2 import from_path, from_gtzan
     from diffwave.params import params
 
-    # torch.backends.cuda.matmul.allow_tf32 = True
-    # torch.backends.cudnn.allow_tf32 = True
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
 
     # torch.backends.cudnn.benchmark = True
     md = PL_diffwav(params)
@@ -805,9 +809,26 @@ if __name__ == "__main__":
     dataset = from_path([#'./testwav/',
                          r'K:\dataa\OpenSinger',r'C:\Users\autumn\Desktop\poject_all\DiffSinger\data\raw\opencpop\segments\wavs'], params)
     datasetv = from_path(['./test/', ], params, ifv=True)
-    #md = md.load_from_checkpoint('./bignet/default/version_13/checkpoints/epoch=6-step=69797.ckpt', params=params)
+    md = md.load_from_checkpoint('a.cpt', params=params)
+    # eee=torch.load('a.cpt')
+    # md.load_state_dict(eee['state_dict'])
+    ccc=torch.load('./bignet_1000/lightning_logs/version_5/checkpoints/epoch=21-step=205675.ckpt')['state_dict']
+    aca=torch.load(r'C:\Users\autumn\Desktop\poject_all\vcoder\bignet\default\version_27\checkpoints\epoch=190-step=1315282.ckpt')['state_dict']
+    for i in ccc:
+        w=aca.get(i)
+        if w is not None:
+            ccc[i]=w
+            # print(w)
+        else:
+            ccc[i] = torch.randn_like(ccc[i])
+            torch.randn_like(ccc[i])
+    dddd=torch.load('./bignet_1000/lightning_logs/version_5/checkpoints/epoch=21-step=205675.ckpt')
+    dddd['state_dict']=ccc
+    torch.save(dddd,'a.cpt')
+
     trainer = pl.Trainer(max_epochs=250, logger=tensorboard, devices=-1, benchmark=True, num_sanity_val_steps=1,
-                         val_check_interval=params.valst,precision="bf16"
+                         val_check_interval=params.valst,
+                         #precision=16
                           #resume_from_checkpoint='./bignet/default/version_25/checkpoints/epoch=134-step=1074397.ckpt'
                          )
     trainer.fit(model=md, train_dataloaders=dataset, val_dataloaders=datasetv, )

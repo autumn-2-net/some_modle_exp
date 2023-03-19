@@ -35,7 +35,7 @@ class AttrDict(dict):
 # srr = 44100
 params = AttrDict(
     # Training params
-    batch_size=9,
+    batch_size=16,
     learning_rate=0.0002,
     max_grad_norm=None,  # 梯度裁切
 
@@ -44,7 +44,7 @@ params = AttrDict(
     n_mels=128,
     n_fft=2048,
     hop_samples=512,  # 目前只正常256  512
-    crop_mel_frames=62,  # Probably an error in paper. 切割片
+    crop_mel_frames=100,  # Probably an error in paper. 切割片
     val_crop_mel_frames=150,
     pre_power=1.0,
     f_min=40,
@@ -56,8 +56,9 @@ params = AttrDict(
     residual_channels=64,
     dilation_cycle_length=10,
     unconditional=False,
-    noise_schedule=np.linspace(1e-4, 0.05, 50).tolist(),  # 层
-    inference_noise_schedule=[0.0001, 0.001, 0.01, 0.05, 0.2, 0.5],  # 加速
+    noise_schedule=np.linspace(1e-4, 0.05, 1000).tolist(),  # 层
+    inference_noise_schedule=[0.00015496854030061513,
+                                 0.002387222135439515, 0.035597629845142365, 0.3681158423423767, 0.4735414385795593, 0.5],  # 加速
     num_cpu=4,  # dl进程
     drop_last=True,  # 丢批
     pin_memory=True,  # 报仇内存
@@ -70,7 +71,7 @@ params = AttrDict(
     lrcc=0.9,  # 酸碱率 衰减
     lrcl=[1, 1, 5, 20, 30],  # 衰减间隔
     frequency=1,  # 衰减器 频率
-    valst=500,  # 验证
+    valst=2000,  # 验证
     loger='TB',  # TB or wandb
 
 )

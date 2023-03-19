@@ -15,7 +15,7 @@ from tqdm import tqdm
 from diffwave import tfff
 
 # tensorboard = pl_loggers.TensorBoardLogger(save_dir="")
-
+from fd.modules import DiffusionDBlock, TimeAware_LVCBlock
 Linear = nn.Linear
 ConvTranspose2d = nn.ConvTranspose2d
 
@@ -29,47 +29,125 @@ def Conv1d(*args, **kwargs):
 @torch.jit.script
 def silu(x):
     return x * torch.sigmoid(x)
+@torch.jit.script
+def swish(x):
+    return x * torch.sigmoid(x)
 
-class dsm(nn.Module):
-    def __init__(self,c,D):
+class FastDiff(nn.Module):
+    """FastDiff module."""
+
+    def __init__(self,
+                 audio_channels=1,
+                 inner_channels=48,
+                 cond_channels=80,
+                 upsample_ratios=[8, 8, 4,2],
+                 lvc_layers_each_block=4,
+                 lvc_kernel_size=3,
+                 kpnet_hidden_channels=96,
+                 kpnet_conv_size=3,
+                 dropout=0.0,
+                 maxstep=1000,
+                 diffusion_step_embed_dim_in=128,
+                 diffusion_step_embed_dim_mid=512,
+                 diffusion_step_embed_dim_out=512,
+                 use_weight_norm=True):
         super().__init__()
-        self.m=nn.Conv1d(in_channels=c,out_channels=c,kernel_size=D,stride=D)
-        self.m2= nn.Conv1d(in_channels=c, out_channels=c, kernel_size=D, stride=D)
-        self.conv = nn.ModuleList([
-            Conv1d(c, c, 3, dilation=1, padding=1),
-            Conv1d(c, c, 3, dilation=2, padding=2),
-            Conv1d(c, c, 3, dilation=4, padding=4),
-        ])
 
-    def forward(self, x):
-        r1=self.m(x)
-        x = self.m2(x)
+        self.diffusion_step_embed_dim_in = diffusion_step_embed_dim_in
 
-        for layer in self.conv:
-            x = F.leaky_relu(x, 0.2)
-            x = layer(x)
-        return x+r1
-class Usm(nn.Module):
-    def __init__(self,c,D):
-        super().__init__()
+        self.audio_channels = audio_channels
+        self.cond_channels = cond_channels
+        self.lvc_block_nums = len(upsample_ratios)
+        self.first_audio_conv = nn.Conv1d(1, inner_channels,
+                                    kernel_size=7, padding=(7 - 1) // 2,
+                                    dilation=1, bias=True)
 
-        self.m=nn.ConvTranspose1d(in_channels=c,out_channels=c,kernel_size=D,stride=D)
-        self.m2= nn.ConvTranspose1d(in_channels=c,out_channels=c,kernel_size=D,stride=D)
-        self.conv = nn.ModuleList([
-            Conv1d(c, c, 3, dilation=1, padding=1),
-            Conv1d(c, c, 3, dilation=2, padding=2),
-            Conv1d(c, c, 3, dilation=4, padding=4),
-        ])
+        # define residual blocks
+        self.lvc_blocks = nn.ModuleList()
+        self.downsample = nn.ModuleList()
 
-    def forward(self, x):
-        r1=self.m(x)
-        x = self.m2(x)
+        # the layer-specific fc for noise scale embedding
+        self.fc_t = nn.ModuleList()
+        # self.fc_t1 = nn.Linear(diffusion_step_embed_dim_in, diffusion_step_embed_dim_mid)
+        # self.fc_t2 = nn.Linear(diffusion_step_embed_dim_mid, diffusion_step_embed_dim_out)
+        self.defe=DiffusionEmbedding(maxstep)
 
-        for layer in self.conv:
-            x = F.leaky_relu(x, 0.2)
-            x = layer(x)
-        return x+r1
+        cond_hop_length = 1
+        for n in range(self.lvc_block_nums):
+            cond_hop_length = cond_hop_length * upsample_ratios[n]
+            lvcb = TimeAware_LVCBlock(
+                in_channels=inner_channels,
+                cond_channels=cond_channels,
+                upsample_ratio=upsample_ratios[n],
+                conv_layers=lvc_layers_each_block,
+                conv_kernel_size=lvc_kernel_size,
+                cond_hop_length=cond_hop_length,
+                kpnet_hidden_channels=kpnet_hidden_channels,
+                kpnet_conv_size=kpnet_conv_size,
+                kpnet_dropout=dropout,
+                noise_scale_embed_dim_out=diffusion_step_embed_dim_out
+            )
+            self.lvc_blocks += [lvcb]
+            self.downsample.append(DiffusionDBlock(inner_channels, inner_channels, upsample_ratios[self.lvc_block_nums-n-1]))
 
+
+        # define output layers
+        self.final_conv = nn.Sequential(nn.Conv1d(inner_channels, audio_channels, kernel_size=7, padding=(7 - 1) // 2,
+                                        dilation=1, bias=True))
+
+        # apply weight norm
+        # if use_weight_norm:
+        #     self.apply_weight_norm()
+
+    def forward(self, data):
+        """Calculate forward propagation.
+        Args:
+            x (Tensor): Input noise signal (B, 1, T).
+            c (Tensor): Local conditioning auxiliary features (B, C ,T').
+        Returns:
+            Tensor: Output tensor (B, out_channels, T)
+        """
+        audio, c, diffusion_steps = data
+
+        # embed diffusion step t
+        diffusion_step_embed = self.defe(diffusion_steps)
+        # diffusion_step_embed = swish(self.fc_t1(diffusion_step_embed))
+        # diffusion_step_embed = swish(self.fc_t2(diffusion_step_embed))
+
+        audio = self.first_audio_conv(audio.unsqueeze(1))
+        downsample = []
+        for down_layer in self.downsample:
+            downsample.append(audio)
+            audio = down_layer(audio)
+
+        x = audio
+        for n, audio_down in enumerate(reversed(downsample)):
+            x = self.lvc_blocks[n]((x, audio_down, c, diffusion_step_embed))
+
+        # apply final layers
+        x = self.final_conv(x)
+
+        return x
+
+    def remove_weight_norm(self):
+        """Remove weight normalization module from all of the layers."""
+        def _remove_weight_norm(m):
+            try:
+                # logging.debug(f"Weight norm is removed from {m}.")
+                torch.nn.utils.remove_weight_norm(m)
+            except ValueError:  # this module didn't have weight norm
+                return
+
+        self.apply(_remove_weight_norm)
+
+    def apply_weight_norm(self):
+        """Apply weight normalization module from all of the layers."""
+        def _apply_weight_norm(m):
+            if isinstance(m, torch.nn.Conv1d) or isinstance(m, torch.nn.Conv2d):
+                torch.nn.utils.weight_norm(m)
+                # logging.debug(f"Weight norm is applied to {m}.")
+
+        self.apply(_apply_weight_norm)
 
 class DiffusionEmbedding(nn.Module):
     def __init__(self, max_steps):
@@ -104,118 +182,14 @@ class DiffusionEmbedding(nn.Module):
         return table
 
 
-class SpectrogramUpsampler(nn.Module):  # 这里有点坑 这里是mel的上采样
-    def __init__(self, n_mels):
-        super().__init__()
-        if n_mels == 256:
-            self.conv1 = ConvTranspose2d(1, 1, [3, 32], stride=[1, 16], padding=[1, 8])
-            self.conv2 = ConvTranspose2d(1, 1, [3, 32], stride=[1, 16], padding=[1, 8])
-        if n_mels == 512:
 
-            self.conv2 = ConvTranspose2d(1, 1, [3, 32], stride=[1, 16], padding=[1, 8])
-
-    def forward(self, x):
-        x = torch.unsqueeze(x, 1)
-
-        x = self.conv2(x)
-        x = F.leaky_relu(x, 0.4)
-        x = torch.squeeze(x, 1)
-        return x
-
-
-class ResidualBlock(nn.Module):  # 残差块吧
-    def __init__(self, n_mels, residual_channels, dilation, uncond=False):
-        '''
-        :param n_mels: inplanes of conv1x1 for spectrogram conditional
-        :param residual_channels: audio conv
-        :param dilation: audio conv dilation
-        :param uncond: disable spectrogram conditional
-        '''
-        super().__init__()
-        self.dilated_conv = Conv1d(residual_channels, 2 * residual_channels, 3, padding=dilation, dilation=dilation)
-        self.diffusion_projection = Linear(512, residual_channels)
-        if not uncond:  # conditional model
-            self.conditioner_projection = Conv1d(n_mels, 2 * residual_channels, 1)  # ??????????????
-        else:  # unconditional model
-            self.conditioner_projection = None
-
-
-        self.output_projection = Conv1d(residual_channels, 2 * residual_channels, 1)
-
-    def forward(self, x, diffusion_step, conditioner=None):
-        assert (conditioner is None and self.conditioner_projection is None) or \
-               (conditioner is not None and self.conditioner_projection is not None)
-
-        diffusion_step = self.diffusion_projection(diffusion_step).unsqueeze(-1)
-        y = x + diffusion_step
-        if self.conditioner_projection is None:  # using a unconditional model
-            y = self.dilated_conv(y)
-        else:
-            conditioner = self.conditioner_projection(conditioner)
-            xcxc = self.dilated_conv(y)
-            y = xcxc + conditioner
-
-        gate, filter = torch.chunk(y, 2, dim=1)
-        y = torch.sigmoid(gate) * torch.tanh(filter)
-
-        y = self.output_projection(y)
-        residual, skip = torch.chunk(y, 2, dim=1)
-
-        return (x + residual) / sqrt(2.0), skip
-
-
-class DiffWave(nn.Module):
-    def __init__(self, params):
-        super().__init__()
-        self.params = params
-        self.input_projection = Conv1d(1, params.residual_channels, 1)
-        self.DD=dsm(params.residual_channels, 32)
-        self.diffusion_embedding = DiffusionEmbedding(len(params.noise_schedule))
-        if self.params.unconditional:  # use unconditional model  #不知道干什么的
-            self.spectrogram_upsampler = None
-        else:
-            self.spectrogram_upsampler = SpectrogramUpsampler(params.hop_samples)
-
-        self.residual_layers = nn.ModuleList([
-            ResidualBlock(params.n_mels, params.residual_channels, 2 ** (i % params.dilation_cycle_length),
-                          uncond=params.unconditional)
-            for i in range(params.residual_layers)
-        ])
-        self.skip_projection = Conv1d(params.residual_channels, params.residual_channels, 1)
-        self.output_projection = Conv1d(params.residual_channels, 1, 1)
-        nn.init.zeros_(self.output_projection.weight)
-        self.UU = Usm(params.residual_channels, 32)
-
-    def forward(self, audio, diffusion_step, spectrogram=None):
-        assert (spectrogram is None and self.spectrogram_upsampler is None) or \
-               (spectrogram is not None and self.spectrogram_upsampler is not None)
-        x = audio.unsqueeze(1)
-        x = self.input_projection(x)
-        x = F.relu(x)
-        x=self.DD(x)
-
-        diffusion_step = self.diffusion_embedding(diffusion_step)
-        if self.spectrogram_upsampler:  # use conditional model
-            spectrogram = self.spectrogram_upsampler(spectrogram)
-
-        skip = None
-        for layer in self.residual_layers:
-            x, skip_connection = layer(x, diffusion_step, spectrogram)
-            skip = skip_connection if skip is None else skip_connection + skip
-
-        x = skip / sqrt(len(self.residual_layers))
-        x=self.UU(x)
-        x = self.skip_projection(x)
-        x = F.relu(x)
-        x = self.output_projection(x)
-        return x
 
 
 class PL_diffwav(pl.LightningModule):
     def __init__(self, params):
         super().__init__()
         self.params = params
-        self.diffwav = DiffWave(self.params)
+        self.diffwav = FastDiff(cond_channels=128)
 
         # self.model_dir = model_dir
         # self.model = model
@@ -239,8 +213,9 @@ class PL_diffwav(pl.LightningModule):
         self.valc = []
 
     def forward(self, audio, diffusion_step, spectrogram=None):
+        a=(audio,spectrogram,diffusion_step)
 
-        return self.diffwav(audio, diffusion_step, spectrogram)
+        return self.diffwav(a)
 
     def on_before_zero_grad(self, optimizer):
         # print(optimizer.state_dict()['param_groups'][0]['lr'],self.global_step)
@@ -402,7 +377,7 @@ class PL_diffwav(pl.LightningModule):
 
         return loss
 
-    def predict(self, spectrogram=None, fast_sampling=True):
+    def predict(self, spectrogram=None, fast_sampling=False):
         # Lazy load model.
         device = spectrogram.device
 
@@ -462,23 +437,21 @@ class PL_diffwav(pl.LightningModule):
 
 if __name__ == "__main__":
     from diffwave.dataset2 import from_path, from_gtzan
-    from diffwave.params import params
+    from fd.params import params
 
     # torch.backends.cuda.matmul.allow_tf32 = True
     # torch.backends.cudnn.allow_tf32 = True
 
     # torch.backends.cudnn.benchmark = True
     md = PL_diffwav(params)
-    tensorboard = pl_loggers.TensorBoardLogger(save_dir="bignet_1000")
+    tensorboard = pl_loggers.TensorBoardLogger(save_dir="FDbignet_1000")
     dataset = from_path([#'./testwav/',
                          r'K:\dataa\OpenSinger',r'C:\Users\autumn\Desktop\poject_all\DiffSinger\data\raw\opencpop\segments\wavs'], params)
     datasetv = from_path(['./test/', ], params, ifv=True)
-    md = md.load_from_checkpoint('./bignet_1000/lightning_logs/version_4/checkpoints/epoch=3-step=18049.ckpt', params=params)
+    #md = md.load_from_checkpoint('./bignet/default/version_13/checkpoints/epoch=6-step=69797.ckpt', params=params)
     trainer = pl.Trainer(max_epochs=250, logger=tensorboard, devices=-1, benchmark=True, num_sanity_val_steps=1,
-                         val_check_interval=params.valst
-                         ,#precision=16
-                         #precision="bf16",
-                        #  resume_from_checkpoint='./bignet_1000/lightning_logs/version_4/checkpoints/epoch=3-step=18049.ckpt'
+                         val_check_interval=params.valst,precision=16
+                          #resume_from_checkpoint='./bignet/default/version_25/checkpoints/epoch=134-step=1074397.ckpt'
                          )
     trainer.fit(model=md, train_dataloaders=dataset, val_dataloaders=datasetv, )
 
