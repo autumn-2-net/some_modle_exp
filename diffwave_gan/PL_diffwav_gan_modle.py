@@ -1,5 +1,5 @@
 import os
-
+os.environ["TORCH_CUDNN_V8_API_ENABLED"] = "1"
 import torch
 import torch.nn as nn
 import matplotlib.pyplot as plt
@@ -828,7 +828,8 @@ if __name__ == "__main__":
 
     trainer = pl.Trainer(max_epochs=250, logger=tensorboard, devices=-1, benchmark=True, num_sanity_val_steps=1,
                          val_check_interval=params.valst,
-                         #precision=16
+                         precision=16
+                          #precision='bf16'
                           #resume_from_checkpoint='./bignet/default/version_25/checkpoints/epoch=134-step=1074397.ckpt'
                          )
     trainer.fit(model=md, train_dataloaders=dataset, val_dataloaders=datasetv, )

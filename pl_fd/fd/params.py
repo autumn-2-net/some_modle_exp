@@ -56,7 +56,7 @@ params = AttrDict(
     residual_channels=64,
     dilation_cycle_length=10,
     unconditional=False,
-    noise_schedule=np.linspace(1e-4, 0.05, 1000).tolist(),  # 层
+    noise_schedule=np.linspace(1e-5, 0.005, 1000).tolist(),  # 层
     inference_noise_schedule=[0.00015496854030061513,
                                  0.002387222135439515, 0.035597629845142365, 0.3681158423423767, 0.4735414385795593, 0.5],  # 加速
     num_cpu=4,  # dl进程

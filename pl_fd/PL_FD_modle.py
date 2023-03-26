@@ -38,12 +38,12 @@ class FastDiff(nn.Module):
 
     def __init__(self,
                  audio_channels=1,
-                 inner_channels=48,
-                 cond_channels=80,
+                 inner_channels=64,
+                 cond_channels=128,#mel
                  upsample_ratios=[8, 8, 4,2],
                  lvc_layers_each_block=4,
                  lvc_kernel_size=3,
-                 kpnet_hidden_channels=96,
+                 kpnet_hidden_channels=128,
                  kpnet_conv_size=3,
                  dropout=0.0,
                  maxstep=1000,
@@ -181,7 +181,13 @@ class DiffusionEmbedding(nn.Module):
         table = torch.cat([torch.sin(table), torch.cos(table)], dim=1)
         return table
 
-
+class lossfn(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fn1=nn.MSELoss()
+        self.fn2 = nn.L1Loss()
+    def forward(self,x,y):
+        return (self.fn1(x,y)+self.fn2(x,y))/2
 
 
 
@@ -205,7 +211,8 @@ class PL_diffwav(pl.LightningModule):
         noise_level = np.cumprod(1 - beta)
         noise_level = torch.tensor(noise_level.astype(np.float32))
         self.noise_level = noise_level
-        self.loss_fn = nn.L1Loss()
+        self.loss_fn = nn.MSELoss()
+        # self.loss_fn = lossfn()
         self.summary_writer = None
         self.grad_norm = 0
         self.lrc = self.params.learning_rate
@@ -448,8 +455,9 @@ if __name__ == "__main__":
     dataset = from_path([#'./testwav/',
                          r'K:\dataa\OpenSinger',r'C:\Users\autumn\Desktop\poject_all\DiffSinger\data\raw\opencpop\segments\wavs'], params)
     datasetv = from_path(['./test/', ], params, ifv=True)
-    #md = md.load_from_checkpoint('./bignet/default/version_13/checkpoints/epoch=6-step=69797.ckpt', params=params)
-    trainer = pl.Trainer(max_epochs=250, logger=tensorboard, devices=-1, benchmark=True, num_sanity_val_steps=1,
+    md = md.load_from_checkpoint('./FDbignet_1000/lightning_logs/version_9/checkpoints/epoch=33-step=98558.ckpt', params=params)
+    # md = torch.compile(md)
+    trainer = pl.Trainer(max_epochs=950, logger=tensorboard, devices=-1, benchmark=True, num_sanity_val_steps=1,
                          val_check_interval=params.valst,precision=16
                           #resume_from_checkpoint='./bignet/default/version_25/checkpoints/epoch=134-step=1074397.ckpt'
                          )
