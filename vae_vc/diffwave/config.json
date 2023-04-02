@@ -7,16 +7,16 @@
     "lr_decay": 0.999,
     "seed": 1234,
 
-    "n_blocks": 22,
+    "n_blocks": 32,
     "latent_dim": 256,
     "latent_dropout": 0.1,
     "dec_istft_input": "cartesian",
 
     "segment_size": 16384,
     "num_mels": 128,
-    "n_fft": 1024,
-    "hop_size": 256,
-    "win_size": 1024,
+    "n_fft": 2048,
+    "hop_size": 512,
+    "win_size": 2048,
     
     "sampling_rate": 44100,
 

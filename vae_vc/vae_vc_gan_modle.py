@@ -302,12 +302,12 @@ if __name__ == "__main__":
     dataset = from_path(tds, params)
     tdsv = ComplexDataset(['./test/', ],
         h.segment_size, h.n_fft, h.num_mels,
-        h.hop_size, h.win_size, h.sampling_rate, h.fmin, h.fmax, True, False, n_cache_reuse=0,
+        h.hop_size, h.win_size, h.sampling_rate, h.fmin, h.fmax, False, False, n_cache_reuse=0,
         fmax_loss=h.fmax_for_loss,
     )
     datasetv = from_path(tdsv, params, ifv=True)
 
-    # md = md.load_from_checkpoint('a.cpt', params=params)
+    md = md.load_from_checkpoint(r'C:\Users\autumn\Desktop\poject_all\vcoder\vae_vc\bignet_1000\lightning_logs\version_0\checkpoints\epoch=9-step=95654.ckpt', params=params,h=h)
 
     # eee=torch.load('a.cpt')
     # md.load_state_dict(eee['state_dict'])

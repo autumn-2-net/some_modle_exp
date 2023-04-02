@@ -294,7 +294,7 @@ class PL_diffwav(pl.LightningModule):
         # writer = tensorboard.SummaryWriter
         writer = SummaryWriter("./mdsr_1000/", purge_step=step)
         # writer = tensorboard
-        writer.add_audio('feature/audio', features['audio'][0], step, sample_rate=self.params.sample_rate)
+        # writer.add_audio('feature/audio', features['audio'][0], step, sample_rate=self.params.sample_rate)
         if not self.params.unconditional:
             mel = self.plot_mel([
 
@@ -303,7 +303,7 @@ class PL_diffwav(pl.LightningModule):
                 [ "Ground-Truth Spectrogram"],
             )
             # writer.add_figure('val_' + str(self.global_step) + '/spectrogram', mel, idx)
-            writer.add_figure('feature/spectrogram',mel , step)
+            # writer.add_figure('feature/spectrogram',mel , step)
         writer.add_scalar('train/loss', loss, step)
         writer.add_scalar('train/grad_norm', self.grad_norm, step)
         writer.add_scalar('train/lr', self.lrc, step)
@@ -455,6 +455,7 @@ if __name__ == "__main__":
     tensorboard = pl_loggers.TensorBoardLogger(save_dir="lagegeFDbignet_1000")
     dataset = from_path([#'./testwav/',
                          r'K:\dataa\OpenSinger',r'C:\Users\autumn\Desktop\poject_all\DiffSinger\data\raw\opencpop\segments\wavs'], params)
+    # dataset= from_path(['./test/', ], params, ifv=True)
     datasetv = from_path(['./test/', ], params, ifv=True)
     #md = md.load_from_checkpoint('./FDbignet_1000/lightning_logs/version_9/checkpoints/epoch=33-step=98558.ckpt', params=params)
     # md = torch.compile(md)
@@ -462,15 +463,15 @@ if __name__ == "__main__":
 
     # monitor = 'val/loss',
 
-    dirpath = 'my/path/',
+    dirpath = './mdscp',
 
-    filename = 'sample-mnist-epoch{epoch:02d}',
+    filename = 'sample-mnist-epoch{epoch:02d}-{epoch}-{step}',
 
-    auto_insert_metric_name = False,every_n_epochs=20
+    auto_insert_metric_name = False,every_n_epochs=20,save_top_k = -1
 
     )
     trainer = pl.Trainer(max_epochs=950, logger=tensorboard, devices=-1, benchmark=True, num_sanity_val_steps=1,
-                         val_check_interval=params.valst,callbacks=[checkpoint_callback],
+                         val_check_interval=2000,callbacks=[checkpoint_callback],
                          precision=16
                           #resume_from_checkpoint='./bignet/default/version_25/checkpoints/epoch=134-step=1074397.ckpt'
                          )
