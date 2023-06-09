@@ -1,0 +1,23 @@
+base_config:
+  - ./base.yaml
+
+#raw_data_dir: 'data/raw/LJSpeech-1.1'
+#processed_data_dir: 'data/processed/LJSpeech'
+#binary_data_dir: 'data/binary/LJSpeech_Taco'
+binary_data_dir: /apdcephfs/share_1316500/nlphuang/data/AdaGrad/LJSpeech_Taco/
+
+binarizer_cls: data_gen.tts.vocoder_binarizer_tacotron.VocoderBinarizer_Tacotron
+
+binarization_args:
+  with_wav: true
+  with_spk_embed: false
+  with_align: false
+  with_word: false
+  with_txt: false
+  with_f0: false
+
+max_sentences: 50 # max batch size in training
+mel_fmin: 0.0
+mel_fmax: 8000.0
+valid_infer_interval: 10000
+val_check_interval: 2000

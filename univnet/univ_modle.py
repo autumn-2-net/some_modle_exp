@@ -41,7 +41,7 @@ class FastDiff(nn.Module):
                  audio_channels=1,
                  inner_channels=64,
                  cond_channels=128,#mel
-                 upsample_ratios=[8, 8, 4,2],
+                 upsample_ratios=[8],
                  lvc_layers_each_block=4,
                  lvc_kernel_size=3,
                  kpnet_hidden_channels=128,
@@ -75,7 +75,8 @@ class FastDiff(nn.Module):
 
         cond_hop_length = 1
         for n in range(self.lvc_block_nums):
-            cond_hop_length = cond_hop_length * upsample_ratios[n]
+            # cond_hop_length = cond_hop_length * upsample_ratios[n]
+            cond_hop_length = 512
             lvcb = TimeAware_LVCBlock(
                 in_channels=inner_channels,
                 cond_channels=cond_channels,
@@ -116,14 +117,11 @@ class FastDiff(nn.Module):
         # diffusion_step_embed = swish(self.fc_t2(diffusion_step_embed))
 
         audio = self.first_audio_conv(audio.unsqueeze(1))
-        downsample = []
-        for down_layer in self.downsample:
-            downsample.append(audio)
-            audio = down_layer(audio)
+
 
         x = audio
-        for n, audio_down in enumerate(reversed(downsample)):
-            x = self.lvc_blocks[n]((x, audio_down, c, diffusion_step_embed))
+        for n, audio_down in enumerate(reversed(self.lvc_blocks)):
+            x = self.lvc_blocks[n]((x, c, diffusion_step_embed))
 
         # apply final layers
         x = self.final_conv(x)
@@ -213,6 +211,7 @@ class PL_diffwav(pl.LightningModule):
         noise_level = torch.tensor(noise_level.astype(np.float32))
         self.noise_level = noise_level
         self.loss_fn = nn.MSELoss()
+
         # self.loss_fn = lossfn()
         self.summary_writer = None
         self.grad_norm = 0
@@ -457,7 +456,7 @@ if __name__ == "__main__":
                          r'K:\dataa\OpenSinger',r'C:\Users\autumn\Desktop\poject_all\DiffSinger\data\raw\opencpop\segments\wavs'], params)
     # dataset= from_path(['./test/', ], params, ifv=True)
     datasetv = from_path(['./test/', ], params, ifv=True)
-    md = md.load_from_checkpoint('./mdscp/sample-mnist-epoch19-19-92977.ckpt', params=params)
+    # md = md.load_from_checkpoint('./mdscp/sample-mnist-epoch19-19-92977.ckpt', params=params)
     # md = torch.compile(md)
     checkpoint_callback = ModelCheckpoint(
 
@@ -472,7 +471,7 @@ if __name__ == "__main__":
     )
     trainer = pl.Trainer(max_epochs=950, logger=tensorboard, devices=-1, benchmark=True, num_sanity_val_steps=1,
                          val_check_interval=2000,callbacks=[checkpoint_callback],
-                         #precision=16
+                         precision='bf16'
                           #resume_from_checkpoint='./bignet/default/version_25/checkpoints/epoch=134-step=1074397.ckpt'
                          )
     trainer.fit(model=md, train_dataloaders=dataset, val_dataloaders=datasetv, )
