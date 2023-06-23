@@ -1,5 +1,6 @@
-import os
 
+import os
+os.environ["TORCH_CUDNN_V8_API_ENABLED"] = "1"
 import torch
 import torch.nn as nn
 import matplotlib.pyplot as plt
@@ -20,7 +21,7 @@ from fd.modules import DiffusionDBlock, TimeAware_LVCBlock
 Linear = nn.Linear
 ConvTranspose2d = nn.ConvTranspose2d
 
-writer = SummaryWriter("./mdsr_1000s/", )
+
 def Conv1d(*args, **kwargs):
     layer = nn.Conv1d(*args, **kwargs)
     nn.init.kaiming_normal_(layer.weight)
@@ -210,7 +211,7 @@ class PL_diffwav(pl.LightningModule):
         noise_level = np.cumprod(1 - beta)
         noise_level = torch.tensor(noise_level.astype(np.float32))
         self.noise_level = noise_level
-        self.loss_fn = nn.MSELoss()
+        self.loss_fn = nn.SmoothL1Loss()
 
         # self.loss_fn = lossfn()
         self.summary_writer = None
@@ -289,7 +290,7 @@ class PL_diffwav(pl.LightningModule):
     # train
 
     def _write_summary(self, step, features, loss):  # log 器
-        tensorboard = self.logger.experiment
+        # tensorboard = self.logger.experiment
         # writer = tensorboard.SummaryWriter
 
         # writer = tensorboard
@@ -445,6 +446,7 @@ class PL_diffwav(pl.LightningModule):
 if __name__ == "__main__":
     from diffwave.dataset2 import from_path, from_gtzan
     from fd.params import params
+    writer = SummaryWriter("./mdsr_1000s/", )
 
     # torch.backends.cuda.matmul.allow_tf32 = True
     # torch.backends.cudnn.allow_tf32 = True
@@ -466,7 +468,7 @@ if __name__ == "__main__":
 
     filename = 'sample-mnist-epoch{epoch:02d}-{epoch}-{step}',
 
-    auto_insert_metric_name = False,every_n_epochs=20,save_top_k = -1
+    auto_insert_metric_name = False,every_n_epochs=5,save_top_k = -1
 
     )
     trainer = pl.Trainer(max_epochs=950, logger=tensorboard, devices=-1, benchmark=True, num_sanity_val_steps=1,
