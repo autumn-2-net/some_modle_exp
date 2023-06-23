@@ -114,7 +114,7 @@ class SpectrogramUpsampler(nn.Module):  # 这里有点坑 这里是mel的上采�
             # self.conv1 = ConvTranspose2d(1, 1, [3, 64], stride=[1, 32], padding=[1, 16])
             # self.conv2 = ConvTranspose2d(1, 1, [3, 32], stride=[1, 16], padding=[1, 8])
             self.conv1 = ConvTranspose2d(1, 5, [3, 64], stride=[1, 32], padding=[1, 16])
-            self.conv2 = ConvTranspose2d(5, 1, [3, 32], stride=[1, 16], padding=[1, 8])
+            self.conv2 = ConvTranspose2d(5, 1, [3, 32], stride=[1, 16], padding=[1, 8])#
     def forward(self, x):
         x = torch.unsqueeze(x, 1)
         x = self.conv1(x)
