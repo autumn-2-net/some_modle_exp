@@ -25,12 +25,15 @@ from torch.utils.data.distributed import DistributedSampler
 
 
 class ConditionalDataset(torch.utils.data.Dataset):
-    def __init__(self, paths):
+    def __init__(self, paths,ikvv):
         super().__init__()
         self.filenames = []
         for path in paths:
             print(paths, path)
             self.filenames += glob(f'{path}/**/*.wav', recursive=True)
+        if not ikvv:
+            self.filenames=self.filenames*10
+
 
     def __len__(self):
         return len(self.filenames)
@@ -100,12 +103,22 @@ class Collator:
 
                 start = random.randint(0, record['spectrogram'].shape[0] - crop_mel_frames)
                 end = start + crop_mel_frames
-                record['spectrogram'] = record['spectrogram'][start:end].T
+                if self.ifv:
+                    record['spectrogram'] = record['spectrogram'].T
+                else:
+                    record['spectrogram'] = record['spectrogram'][start:end].T
 
                 start *= samples_per_frame
                 end *= samples_per_frame
-                record['audio'] = record['audio'][start:end]
-                record['audio'] = np.pad(record['audio'], (0, (end - start) - len(record['audio'])), mode='constant')
+                if self.ifv:
+                    record['audio'] = record['audio']
+                    record['audio'] = np.pad(record['audio'], (0, (len(record['spectrogram'].T)*samples_per_frame ) - len(record['audio'])),
+                                             mode='constant')
+                    pass
+                else:
+                    # record['spectrogram'] = record['spectrogram'][start:end].T
+                    record['audio'] = record['audio'][start:end]
+                    record['audio'] = np.pad(record['audio'], (0, (end - start) - len(record['audio'])), mode='constant')
 
         audio = np.stack([record['audio'] for record in minibatch if 'audio' in record])
         if self.params.unconditional:
@@ -150,7 +163,7 @@ def from_path(data_dirs, params, is_distributed=False,ifv=False):
     if params.unconditional:
         dataset = UnconditionalDataset(data_dirs)
     else:  # with condition
-        dataset = ConditionalDataset(data_dirs)
+        dataset = ConditionalDataset(data_dirs,ifv)
     bs=params.batch_size
     if ifv:
         bs=1

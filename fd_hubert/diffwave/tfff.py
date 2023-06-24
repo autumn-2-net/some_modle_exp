@@ -16,12 +16,12 @@ def transform(audio):
 
   mel_args = {
       'sample_rate': params.sample_rate,
-      'win_length': 256 * 4,
-      'hop_length': 256,
-      'n_fft': 1024,
+      'win_length': 4096,
+      'hop_length': 128,
+      'n_fft': 4096,
       'f_min': 20.0,
       'f_max': params.sample_rate / 2.0,
-      'n_mels': 256,
+      'n_mels': 300,
       'power': 1.0,
       'normalized': True,
   }

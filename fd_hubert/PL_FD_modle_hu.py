@@ -212,12 +212,13 @@ class PL_diffwav(pl.LightningModule):
         noise_level = np.cumprod(1 - beta)
         noise_level = torch.tensor(noise_level.astype(np.float32))
         self.noise_level = noise_level
-        self.loss_fn = nn.MSELoss()
+        # self.loss_fn = nn.MSELoss()
+        self.loss_fn = nn.L1Loss()
         # self.loss_fn = lossfn()
         self.summary_writer = None
         self.grad_norm = 0
         self.lrc = self.params.learning_rate
-        self.val_loss = 0
+        self.val_loss = []
         self.valc = []
 
     def forward(self, audio, diffusion_step, spectrogram=None):
@@ -263,7 +264,7 @@ class PL_diffwav(pl.LightningModule):
         predicted = self.forward(noisy_audio, t, spectrogram)
         loss = self.loss_fn(noise, predicted.squeeze(1))
         if self.is_master:
-            if self.global_step % 50 == 0:
+            if self.global_step % 10 == 0:
                 if self.global_step!=0:
 
                     self._write_summary(self.global_step, accc, loss)
@@ -284,8 +285,8 @@ class PL_diffwav(pl.LightningModule):
                 # "lr_scheduler": lt
                 }
 
-    def on_after_backward(self):
-        self.grad_norm = nn.utils.clip_grad_norm_(self.parameters(), self.params.max_grad_norm or 1e9)
+    # def on_after_backward(self):
+    #     self.grad_norm = nn.utils.clip_grad_norm_(self.parameters(), self.params.max_grad_norm or 1e9)
 
     # train
 
@@ -342,8 +343,15 @@ class PL_diffwav(pl.LightningModule):
         return fig
 
     def on_validation_end(self):
+        ppp=0
+        exex=len(self.val_loss)
+        for ix in self.val_loss:
+            ppp=ppp+ix
+        lossss=ppp/exex
 
-        writer.add_scalar('val/loss', self.val_loss, self.global_step)
+
+
+        writer.add_scalar('val/loss', lossss, self.global_step)
 
         for idx, i in enumerate(self.valc):
             writer.add_audio('val_' + str(self.global_step) + '/audio_gt', i['audio'][0], idx,
@@ -363,7 +371,7 @@ class PL_diffwav(pl.LightningModule):
     def validation_step(self, batch, idx):
         # print(idx)
         if idx == 0:
-            self.val_loss = 0
+            self.val_loss = []
             self.valc = []
 
         accc = {
@@ -374,11 +382,13 @@ class PL_diffwav(pl.LightningModule):
 
         audio = accc['audio']
         spectrogram = accc['spectrogram']
-        aaac, opo = self.predict(spectrogram, fast_sampling=True)
+        aaac, opo = self.predict(spectrogram, fast_sampling=False)
         loss = self.loss_fn(aaac, audio)
         accc['gad'] = aaac
         # print(loss)
-        self.val_loss = (loss + self.val_loss) / 2
+
+        self.val_loss.append(loss)
+        accc['spectrogram']=tfff.transform(accc['audio'].detach().cpu())
 
         accc['spectrogramg'] = tfff.transform(aaac.detach().cpu())
         self.valc.append(accc)
@@ -460,20 +470,20 @@ if __name__ == "__main__":
         r'C:\Users\autumn\Desktop\poject_all\DiffSinger\data\raw\opencpop\segments\wavs'], params)
     # dataset= from_path(['./test/', ], params, ifv=True)
     datasetv = from_path(['./test/', ], params, ifv=True)
-    # md = md.load_from_checkpoint('./mdscp/sample-mnist-epoch19-19-92977.ckpt', params=params)
+    md = md.load_from_checkpoint('./mdscp/sample-mnist-epoch99-99-37500.ckpt', params=params)
     # md = torch.compile(md)
     checkpoint_callback = ModelCheckpoint(
 
     # monitor = 'val/loss',
 
-    dirpath = './mdscp',
+    dirpath = './mdscpscx',
 
     filename = 'sample-mnist-epoch{epoch:02d}-{epoch}-{step}',
 
-    auto_insert_metric_name = False,every_n_epochs=20,save_top_k = -1
+    auto_insert_metric_name = False,every_n_epochs=5,save_top_k = -1
 
     )
-    trainer = pl.Trainer(max_epochs=950, logger=tensorboard, devices=-1, benchmark=True, num_sanity_val_steps=1,
+    trainer = pl.Trainer(max_epochs=1950, logger=tensorboard, devices=-1, benchmark=True, num_sanity_val_steps=1,
                         # val_check_interval=2000,
                          callbacks=[checkpoint_callback],check_val_every_n_epoch=1,
                          precision=16

@@ -35,7 +35,7 @@ class AttrDict(dict):
 # srr = 44100
 params = AttrDict(
     # Training params
-    batch_size=32,#32 batch_size=10,
+    batch_size=10,#32 batch_size=10,
     learning_rate=0.0002,
     max_grad_norm=None,  # 梯度裁切
 
@@ -56,10 +56,10 @@ params = AttrDict(
     residual_channels=64,
     dilation_cycle_length=10,
     unconditional=False,
-    noise_schedule=np.linspace(1e-5, 0.005, 1000).tolist(),  # 层
+    noise_schedule=np.linspace(1e-5, 0.01, 1000).tolist(),  # 层
     inference_noise_schedule=[0.00015496854030061513,
-                                 0.002387222135439515, 0.035597629845142365, 0.3681158423423767, 0.4735414385795593, 0.5],  # 加速
-    num_cpu=4,  # dl进程
+                                 0.002387222135439515,0.011,0.02187222135439515, 0.035597629845142365, 0.3681158423423767, 0.4735414385795593, 0.5],  # 加速
+    num_cpu=2,  # dl进程
     drop_last=True,  # 丢批
     pin_memory=True,  # 报仇内存
 

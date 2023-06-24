@@ -91,8 +91,8 @@ def transform(filename):
     # spectrogram = 20 * torch.log10(torch.clamp(spectrogram, min=1e-5)) - 20
     spectrogram=torch.log(torch.clamp(spectrogram, min=1e-5))
     # spectrogram = torch.clamp((spectrogram + 100) / 100, 0.0, 1.0)
-    # np.save(f'{filename}.spec.npy', spectrogram.cpu().numpy())
-    f0,uv=get_f0(path_srcfile=filename,hop_length=params.hop_samples,sampling_rate=params.sample_rate,f0_extractor=params.f0exp,f0_max=params.f0max,f0_min=params.f0min,melL=len(spectrogram.cpu().numpy().T))
+    np.save(f'{filename}.spec.npy', spectrogram.cpu().numpy())
+    # f0,uv=get_f0(path_srcfile=filename,hop_length=params.hop_samples,sampling_rate=params.sample_rate,f0_extractor=params.f0exp,f0_max=params.f0max,f0_min=params.f0min,melL=len(spectrogram.cpu().numpy().T))
     f0, uv = get_f0(path_srcfile=filename, hop_length=512, sampling_rate=44100,
                     f0_extractor='dio', f0_max=1600, f0_min=40,
                     melL=len(spectrogram.cpu().numpy().T))
