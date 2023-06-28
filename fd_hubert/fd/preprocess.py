@@ -24,8 +24,8 @@ from glob import glob
 
 from torchaudio.transforms import MelSpectrogram
 from tqdm import tqdm
-# from .dl import get_f0
-from dl import get_f0
+from .dl import get_f0
+# from dl import get_f0
 
 from diffwave.params import params
 def get_mel_from_audio(
@@ -91,14 +91,14 @@ def transform(filename):
     # spectrogram = 20 * torch.log10(torch.clamp(spectrogram, min=1e-5)) - 20
     spectrogram=torch.log(torch.clamp(spectrogram, min=1e-5))
     # spectrogram = torch.clamp((spectrogram + 100) / 100, 0.0, 1.0)
-    np.save(f'{filename}.spec.npy', spectrogram.cpu().numpy())
+    # np.save(f'{filename}.spec.npy', spectrogram.cpu().numpy())
     # f0,uv=get_f0(path_srcfile=filename,hop_length=params.hop_samples,sampling_rate=params.sample_rate,f0_extractor=params.f0exp,f0_max=params.f0max,f0_min=params.f0min,melL=len(spectrogram.cpu().numpy().T))
     f0, uv = get_f0(path_srcfile=filename, hop_length=512, sampling_rate=44100,
-                    f0_extractor='dio', f0_max=1600, f0_min=40,
+                    f0_extractor='harvest', f0_max=1600, f0_min=40,
                     melL=len(spectrogram.cpu().numpy().T))
     if f0 is not None:
         np.save(f'{filename}.f0.npy', f0)
-        np.save(f'{filename}.uv.npy', uv)
+        # np.save(f'{filename}.uv.npy', uv)
     else:
         with open('black.txt', 'a',encoding='utf-8') as f:
             f.write(filename)
@@ -113,7 +113,7 @@ def main(args):
 
 def myuse(pathchs):
     filenames = glob(f'{pathchs}/**/*.wav', recursive=True)
-    with ProcessPoolExecutor(max_workers=4) as executor:
+    with ProcessPoolExecutor(max_workers=5) as executor:
         list(tqdm(executor.map(transform, filenames), desc='Preprocessing', total=len(filenames)))
 
 if __name__ == '__main__':

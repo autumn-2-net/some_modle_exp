@@ -3,6 +3,7 @@ import torch
 import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
+from einops import rearrange
 
 from torch.nn import Conv1d
 
@@ -137,7 +138,16 @@ class DiffusionDBlock(nn.Module):
 
     return x + residual
 
+class GLUX(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.dim = dim
+        self.Lin1 = nn.Linear(dim, dim)
+        self.Lin2 = nn.Linear(dim, dim)
 
+    def forward(self, x):
+        out, gate = self.Lin1(x), self.Lin2(x)
+        return out * gate.sigmoid()
 class TimeAware_LVCBlock(torch.nn.Module):
     ''' time-aware location-variable convolutions
     '''
@@ -179,7 +189,9 @@ class TimeAware_LVCBlock(torch.nn.Module):
 
         # the layer-specific fc for noise scale embedding
         self.fc_t = torch.nn.Linear(noise_scale_embed_dim_out, cond_channels)
-
+        self.F0emb = torch.nn.Linear(1, 512)
+        self.GLUXg=GLUX(512)
+        self.F0x = torch.nn.Linear(512, cond_channels)
         for i in range(conv_layers):
             padding = (3 ** i) * int((conv_kernel_size - 1) / 2)
             conv = torch.nn.Conv1d(in_channels, in_channels, kernel_size=conv_kernel_size, padding=padding, dilation=3 ** i)
@@ -196,11 +208,17 @@ class TimeAware_LVCBlock(torch.nn.Module):
         Returns:
             Tensor: the output sequence (batch, in_channels, in_length)
         '''
-        x, audio_down, c, noise_embedding = data
+        x, audio_down, c, noise_embedding,f0 = data
         batch, in_channels, in_length = x.shape
 
         noise = (self.fc_t(noise_embedding)).unsqueeze(-1)  # (B, 80)
-        condition = c + noise  # (B, 80, T)
+        f0=f0
+        cf0=self.F0emb( f0/1280)
+        cf0=self.GLUXg(cf0)
+
+        cf0=self.F0x(cf0)
+        cf0 = rearrange(cf0, 'b h n  -> b n h')
+        condition = c + noise +cf0 # (B, 80, T)
         kernels, bias = self.kernel_predictor(condition)
         x = F.leaky_relu(x, 0.2)
         x = self.upsample(x)

@@ -33,6 +33,11 @@ class ConditionalDataset(torch.utils.data.Dataset):
             self.filenames += glob(f'{path}/**/*.wav', recursive=True)
         if not ikvv:
             self.filenames=self.filenames*10
+        # else:
+        #     eee=self.filenames.copy()
+        #     o=[]
+        #     for i in eee:
+
 
 
     def __len__(self):
@@ -43,10 +48,11 @@ class ConditionalDataset(torch.utils.data.Dataset):
         spec_filename = f'{audio_filename}.hub.npy.hub.npy'
         signal, _ = torchaudio.load(audio_filename)
         spectrogram = np.load(spec_filename)
+        spectrogramf0 = np.load(f'{audio_filename}.f0.npy')
         # return signal[0],spectrogram.T
         return {
             'audio': signal[0],
-            'spectrogram': spectrogram.T
+            'spectrogram': spectrogram.T,'f0':spectrogramf0
         }
 
 
@@ -88,6 +94,7 @@ class Collator:
                 if len(record['audio']) < self.params.audio_len:
                     del record['spectrogram']
                     del record['audio']
+                    del record['f0']
                     continue
 
                 start = random.randint(0, record['audio'].shape[-1] - self.params.audio_len)
@@ -99,15 +106,17 @@ class Collator:
                 if len(record['spectrogram']) < crop_mel_frames:
                     del record['spectrogram']
                     del record['audio']
+                    del record['f0']
                     continue
 
-                start = random.randint(0, record['spectrogram'].shape[0] - crop_mel_frames)
+                start = random.randint(0, record['spectrogram'].shape[0]-1 - crop_mel_frames)
                 end = start + crop_mel_frames
                 if self.ifv:
                     record['spectrogram'] = record['spectrogram'].T
+                    record['f0'] = record['f0']
                 else:
                     record['spectrogram'] = record['spectrogram'][start:end].T
-
+                    record['f0'] = record['f0'][start:end]
                 start *= samples_per_frame
                 end *= samples_per_frame
                 if self.ifv:
@@ -127,7 +136,8 @@ class Collator:
                 'spectrogram': None,
             }
         spectrogram = np.stack([record['spectrogram'] for record in minibatch if 'spectrogram' in record])
-        return torch.from_numpy(audio),torch.from_numpy(spectrogram)
+        f0f=np.stack([record['f0'] for record in minibatch if 'f0' in record])
+        return torch.from_numpy(audio),torch.from_numpy(spectrogram),torch.from_numpy(f0f)
         # return {
         #     'audio': torch.from_numpy(audio),
         #     'spectrogram': torch.from_numpy(spectrogram),
@@ -173,7 +183,7 @@ def from_path(data_dirs, params, is_distributed=False,ifv=False):
         collate_fn=Collator(params,ifv).collate,
         shuffle=not ifv,
         # num_workers=os.cpu_count(),
-        num_workers=params.num_cpu,
+        num_workers=params.num_cpu,prefetch_factor=4,
 
         sampler=DistributedSampler(dataset) if is_distributed else None,
         pin_memory=params.pin_memory,
