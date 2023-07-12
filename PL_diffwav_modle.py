@@ -9,6 +9,7 @@ import torch.nn.functional as F
 from math import sqrt
 import numpy as np
 from pytorch_lightning import loggers as pl_loggers
+from pytorch_lightning.callbacks import ModelCheckpoint
 from torch.optim.lr_scheduler import MultiStepLR
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
@@ -423,13 +424,24 @@ if __name__ == "__main__":
     # torch.backends.cudnn.allow_tf32 = True
 
     # torch.backends.cudnn.benchmark = True
+    checkpoint_callback = ModelCheckpoint(
+
+        # monitor = 'val/loss',
+
+        dirpath='./mdscpscxVatt',
+
+        filename='sample-mnist-epoch{epoch:02d}-{epoch}-{step}',
+
+        auto_insert_metric_name=False, every_n_epochs=4, save_top_k=-1
+
+    )
     md = PL_diffwav(params)
     tensorboard = pl_loggers.TensorBoardLogger(save_dir="bignet_1000")
     dataset = from_path([#'./testwav/',
                          r'K:\dataa\OpenSinger',r'C:\Users\autumn\Desktop\poject_all\DiffSinger\data\raw\opencpop\segments\wavs'], params)
     datasetv = from_path(['./test/', ], params, ifv=True)
     #md = md.load_from_checkpoint('./bignet/default/version_13/checkpoints/epoch=6-step=69797.ckpt', params=params)
-    trainer = pl.Trainer(max_epochs=250, logger=tensorboard, devices=-1, benchmark=True, num_sanity_val_steps=1,
+    trainer = pl.Trainer(max_epochs=250, logger=tensorboard, devices=-1, benchmark=True, num_sanity_val_steps=1,  callbacks=[checkpoint_callback],
                          val_check_interval=params.valst,precision="bf16"
                           #resume_from_checkpoint='./bignet/default/version_25/checkpoints/epoch=134-step=1074397.ckpt'
                          )

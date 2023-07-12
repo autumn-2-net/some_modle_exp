@@ -68,9 +68,9 @@ params = AttrDict(
     # 优化参数
     interval='epoch',  # 调度的单位，epoch或step
     lrcc=0.9,  # 酸碱率 衰减
-    lrcl=[1, 1, 5, 20, 30],  # 衰减间隔
+    lrcl=[5, 5, 5, 20, 30],  # 衰减间隔
     frequency=1,  # 衰减器 频率
-    valst=2000,  # 验证
+    valst=10000,  # 验证
     loger='TB',  # TB or wandb
 
 )
