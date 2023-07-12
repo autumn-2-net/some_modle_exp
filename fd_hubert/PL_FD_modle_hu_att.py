@@ -19,7 +19,8 @@ from diffwave import tfff
 
 # tensorboard = pl_loggers.TensorBoardLogger(save_dir="")
 from fd.modules import DiffusionDBlock, TimeAware_LVCBlock
-from fd.sc import V3LSGDRLR
+from fd.sc import V3LSGDRLR, V3WLR
+from fd.conformer_ec_atten_full import Conformer
 
 Linear = nn.Linear
 ConvTranspose2d = nn.ConvTranspose2d
@@ -204,6 +205,7 @@ class PL_diffwav(pl.LightningModule):
         super().__init__()
         self.params = params
         self.diffwav = FastDiff(cond_channels=768)
+        self.cfx=Conformer()
 
         # self.model_dir = model_dir
         # self.model = model
@@ -229,6 +231,9 @@ class PL_diffwav(pl.LightningModule):
         self.valc = []
 
     def forward(self, audio, diffusion_step, spectrogram,f0):
+
+        spectrogram=self.cfx(spectrogram).squeeze(1)
+
         a=(audio,spectrogram,diffusion_step,f0)
 
         return self.diffwav(a)
@@ -281,7 +286,7 @@ class PL_diffwav(pl.LightningModule):
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.params.learning_rate)
         lt = {
-            "scheduler": V3LSGDRLR(optimizer,),  # 调度器
+            "scheduler": V3WLR(optimizer,),  # 调度器
             "interval": 'step',  # 调度的单位，epoch或step
             #"frequency": self.params.frequency,  # 调度的频率，多少轮一次
             "reduce_on_plateau": False,  # ReduceLROnPlateau
@@ -509,7 +514,7 @@ if __name__ == "__main__":
     from diffwave.dataset2 import from_path, from_gtzan
     from fd.params import params
 
-    writer = SummaryWriter("./mdsr_1000sV/", )
+    writer = SummaryWriter("./mdsr_1000sVatt/", )
 
     # torch.backends.cuda.matmul.allow_tf32 = True
     # torch.backends.cudnn.allow_tf32 = True
@@ -522,29 +527,34 @@ if __name__ == "__main__":
         r'C:\Users\autumn\Desktop\poject_all\DiffSinger\data\raw\opencpop\segments\wavs'], params)
     # dataset= from_path(['./test/', ], params, ifv=True)
     datasetv = from_path(['./test/', ], params, ifv=True)
-    # md = md.load_from_checkpoint('./mdscp/sample-mnist-epoch99-99-37500.ckpt', params=params)
-    eee=torch.load('./mdscpscx/sample-mnist-epoch03-3-15024.ckpt')['state_dict']
-    # del eee['diffwav.lvc_blocks.0.kernel_predictor.input_conv.0.weigh']
-    # x= OrderedDict[{}]
-    e={}
-    for ii in eee:
-        # print(ii)
-        if ii in ['diffwav.lvc_blocks.0.kernel_predictor.input_conv.0.weight','diffwav.lvc_blocks.0.fc_t.weight','diffwav.lvc_blocks.0.fc_t.bias','diffwav.lvc_blocks.0.F0x.weight','diffwav.lvc_blocks.0.F0x.bias']:
-            continue
-        if ii in ['diffwav.lvc_blocks.1.kernel_predictor.input_conv.0.weight', 'diffwav.lvc_blocks.1.fc_t.weight',
-                  'diffwav.lvc_blocks.1.fc_t.bias', 'diffwav.lvc_blocks.1.F0x.weight', 'diffwav.lvc_blocks.1.F0x.bias']:
-            continue
-        if ii in ['diffwav.lvc_blocks.2.kernel_predictor.input_conv.0.weight', 'diffwav.lvc_blocks.2.fc_t.weight',
-                  'diffwav.lvc_blocks.2.fc_t.bias', 'diffwav.lvc_blocks.2.F0x.weight', 'diffwav.lvc_blocks.2.F0x.bias']:
-            continue
-        e[ii]=eee[ii]
-    md.load_state_dict(e,strict=False)
-    # md = torch.compile(md)
+    # md = md.load_from_checkpoint('./mdscpscxV/sample-mnist-epoch15-15-60096.ckpt', params=params)
+
+
+    md.load_state_dict(torch.load('./mdscpscxV/sample-mnist-epoch15-15-60096.ckpt')['state_dict'], strict=False)
+    # eee=torch.load('./mdscpscx/sample-mnist-epoch03-3-15024.ckpt')['state_dict']
+
+
+    # # del eee['diffwav.lvc_blocks.0.kernel_predictor.input_conv.0.weigh']
+    # # x= OrderedDict[{}]
+    # e={}
+    # for ii in eee:
+    #     # print(ii)
+    #     if ii in ['diffwav.lvc_blocks.0.kernel_predictor.input_conv.0.weight','diffwav.lvc_blocks.0.fc_t.weight','diffwav.lvc_blocks.0.fc_t.bias','diffwav.lvc_blocks.0.F0x.weight','diffwav.lvc_blocks.0.F0x.bias']:
+    #         continue
+    #     if ii in ['diffwav.lvc_blocks.1.kernel_predictor.input_conv.0.weight', 'diffwav.lvc_blocks.1.fc_t.weight',
+    #               'diffwav.lvc_blocks.1.fc_t.bias', 'diffwav.lvc_blocks.1.F0x.weight', 'diffwav.lvc_blocks.1.F0x.bias']:
+    #         continue
+    #     if ii in ['diffwav.lvc_blocks.2.kernel_predictor.input_conv.0.weight', 'diffwav.lvc_blocks.2.fc_t.weight',
+    #               'diffwav.lvc_blocks.2.fc_t.bias', 'diffwav.lvc_blocks.2.F0x.weight', 'diffwav.lvc_blocks.2.F0x.bias']:
+    #         continue
+    #     e[ii]=eee[ii]
+    # md.load_state_dict(e,strict=False)
+    # # md = torch.compile(md)
     checkpoint_callback = ModelCheckpoint(
 
     # monitor = 'val/loss',
 
-    dirpath = './mdscpscxV',
+    dirpath = './mdscpscxVatt',
 
     filename = 'sample-mnist-epoch{epoch:02d}-{epoch}-{step}',
 

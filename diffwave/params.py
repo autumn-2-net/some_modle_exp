@@ -57,8 +57,7 @@ params = AttrDict(
     dilation_cycle_length=10,
     unconditional=False,
     noise_schedule=np.linspace(1e-4, 0.05, 50).tolist(),  # 层
-    inference_noise_schedule=[6.689325005027058e-07, 1.0033881153503899e-05, 0.00015496854030061513,
-                                 0.002387222135439515, 0.035597629845142365, 0.3681158423423767, 0.4735414385795593, 0.5],  # 加速
+    inference_noise_schedule=[0.0001, 0.001, 0.01, 0.05, 0.2, 0.5],  # 加速
     num_cpu=4,  # dl进程
     drop_last=True,  # 丢批
     pin_memory=True,  # 报仇内存
