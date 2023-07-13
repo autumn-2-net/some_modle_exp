@@ -257,8 +257,8 @@ class PL_diffwav(pl.LightningModule):
                 # "lr_scheduler": lt
                 }
 
-    def on_after_backward(self):
-        self.grad_norm = nn.utils.clip_grad_norm_(self.parameters(), self.params.max_grad_norm or 1e9)
+    # def on_after_backward(self):
+    #     self.grad_norm = nn.utils.clip_grad_norm_(self.parameters(), self.params.max_grad_norm or 1e9)
 
     # train
 
@@ -445,5 +445,6 @@ if __name__ == "__main__":
                          val_check_interval=params.valst,precision="bf16"
                           #resume_from_checkpoint='./bignet/default/version_25/checkpoints/epoch=134-step=1074397.ckpt'
                          )
-    trainer.fit(model=md, train_dataloaders=dataset, val_dataloaders=datasetv, )
+    trainer.fit(model=md, train_dataloaders=dataset, val_dataloaders=datasetv,ckpt_path=None
+                )
 
