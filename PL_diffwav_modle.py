@@ -436,6 +436,8 @@ if __name__ == "__main__":
 
     )
     md = PL_diffwav(params)
+    # md=torch.compile(md)
+
     tensorboard = pl_loggers.TensorBoardLogger(save_dir="bignet_1000")
     dataset = from_path([#'./testwav/',
                          r'K:\dataa\OpenSinger',r'C:\Users\autumn\Desktop\poject_all\DiffSinger\data\raw\opencpop\segments\wavs'], params)
