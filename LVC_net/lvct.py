@@ -16,6 +16,7 @@ from torch.optim.lr_scheduler import MultiStepLR
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
+from SWN import SwitchNorm2d
 from T_lvc import LVCNetGenerator
 from losses import PWGLoss
 from lvc import tfff
@@ -49,6 +50,78 @@ class Upcon(nn.Module):
         # x = F.leaky_relu(x, 0.4)
         spectrogram = torch.squeeze(x, 1)
         return spectrogram
+class GLU(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.dim = dim
+
+    def forward(self, x):
+        out, gate = x.chunk(2, dim=self.dim)
+        return out * gate.sigmoid()
+
+class covD(nn.Module):
+    def __init__(self,C,D):
+        super().__init__()
+        self.Glu=GLU(1)
+        self.n1=SwitchNorm2d(C)
+        self.n2 = SwitchNorm2d(C)
+        self.n3 = SwitchNorm2d(C)
+        self.n4 = SwitchNorm2d(C)
+
+        self.C1=nn.Conv2d(C,C*2,kernel_size=3,padding=(3 + 2 * (D - 1)) // 2,dilation=D)
+        self.C2 = nn.Conv2d(C, C * 2, kernel_size=5, padding=(5 + 4 * (D - 1)) // 2, dilation=D)
+        self.C3 = nn.Conv2d(C, C * 2, kernel_size=7, padding=(7 + 6 * (D - 1)) // 2, dilation=D)
+        self.C4 = nn.Conv2d(C, C * 2, kernel_size=9, padding=(9 + 8 * (D - 1)) // 2, dilation=D)
+    def forward(self, x):
+        x=x+self.n1(self.Glu(self.C1(x)))
+        x = x + self.n2(self.Glu(self.C2(x)))
+        x = x + self.n3 (self.Glu(self.C3(x)))
+        x = x + self.n4(self.Glu(self.C4(x)))
+        return x
+
+class UpconD(nn.Module):
+
+    def __init__(self):
+        super().__init__()
+        self.c1 = torch.nn.Conv2d(1, 8, kernel_size=1)
+        self.UP = torch.nn.ConvTranspose2d(4, 8, [3, 32], stride=[1, 2], padding=[1, 15])
+        self.Glu = GLU(1)
+        self.c3 = torch.nn.Conv2d(4, 2, kernel_size=1)
+
+        # self.Modl = []
+        # self.net=nn.Sequential()
+        self.Modl = []
+
+        for i in range(6):
+            self.Modl.append(covD(4, 2 ** (i % 3)))
+        self.net = nn.Sequential(*self.Modl)
+
+        self.Modl = []
+
+        for i in range(6):
+            self.Modl.append(covD(4, 2 ** (i % 3)))
+        self.net1 = nn.Sequential(*self.Modl)
+
+
+    def forward(self, x):
+        x = torch.unsqueeze(x, 1)
+        x=self.Glu (self.c1(x))
+        x=self.net(x)
+
+        x = self.Glu (self.UP(x))
+        x = self.net1(x)
+        x =self.Glu(self.c3(x))
+        # x = F.leaky_relu(x, 0.4)
+        # x=F.leaky_relu(self.c1(x), 0.4)+x
+        # x = F.leaky_relu(self.c2(x), 0.4) + x
+        # x = F.leaky_relu(self.cc2(x), 0.4) + x
+        # x = F.leaky_relu(self.ccc2(x), 0.4) + x
+        # x = F.leaky_relu(self.c3(x), 0.4)
+
+        # x = self.conv2(x)
+        # x = F.leaky_relu(x, 0.4)
+        spectrogram = torch.squeeze(x, 1)
+        return spectrogram
 
 
 
@@ -56,16 +129,16 @@ class PL_diffwav(pl.LightningModule):
     def __init__(self, params):
         super().__init__()
         self.params = params
-        self.diffwav = LVCNetGenerator(in_channels=64,
+        self.diffwav = LVCNetGenerator(in_channels=16,
                  out_channels=1,
-                 inner_channels=32,
+                 inner_channels=10,
                  cond_channels=128,
                  cond_hop_length=256,
-                 lvc_block_nums=4,
+                 lvc_block_nums=3,
                  lvc_layers_each_block=10,
-                 lvc_kernel_size=3,
+                 lvc_kernel_size=17,
                  kpnet_hidden_channels=96,
-                 kpnet_conv_size=3,
+                 kpnet_conv_size=5,
                  dropout=0.0,)
 
         # self.model_dir = model_dir
@@ -77,20 +150,15 @@ class PL_diffwav(pl.LightningModule):
         # self.scaler = torch.cuda.amp.GradScaler(enabled=kwargs.get('fp16', False))
         self.step = 0
         self.is_master = True
-        self.lossx=PWGLoss(stft_loss_params={ 'fft_sizes':[#2048,
-                                                           1024, 2048, 512#,128
-                                                           ],
-                 'hop_sizes':[#256,
-                              120, 240, 50#,25
-                              ],
-                 'win_lengths':[#1024,
-                                600, 1200, 240#,64
-                 ],
+        self.lossx=PWGLoss(stft_loss_params={
+                  'fft_sizes':[2048,1024, 2048, 512,128,2048,4096,4096],
+                  'hop_sizes':[256 ,120 , 240 , 50 ,25 ,256 ,256 ,400],
+                'win_lengths':[1024,600 , 1200, 240,64 ,512 ,1024,2048],
                  'window':"hann_window"})
 
 
 
-        self.UP=Upcon()
+        self.UP=UpconD()
 
         # self.loss_fn = nn.MSELoss()
         self.loss_fn = nn.L1Loss()
@@ -142,7 +210,7 @@ class PL_diffwav(pl.LightningModule):
         device = audio.device
 
         b, c, t = spectrogram.size()
-        noist = torch.randn(b, 64, t * 512,device=device).type_as(audio)
+        noist = torch.randn(b, 16, t * 512,device=device).type_as(audio)
 
         aaac = self(noist, spectrogram)
         loss=self.loss_fn(aaac,audio)
@@ -184,19 +252,21 @@ class PL_diffwav(pl.LightningModule):
         # writer.add_audio('feature/audio', features['audio'][0], step, sample_rate=self.params.sample_rate)
 
         # if not self.params.unconditional:
-        #     mel = self.plot_mel([
-        #
-        #        features['spectrogram'][:1].detach().cpu().numpy()[0],
-        #     ],
-        #         [ "Ground-Truth Spectrogram"],
 
-        #     )
         if step %500==0:
             writer.add_audio('T_' + '' + '/audio_P', pre_audio[0], step,
                              sample_rate=self.params.sample_rate)
+            acccX = tfff.transform(pre_audio[0].detach().cpu().float())[0]
+            mel = self.plot_mel([
+
+                acccX,
+            ],
+                ["PSpectrogram"],
+
+            )
 
             # writer.add_figure('val_' + str(self.global_step) + '/spectrogram', mel, idx)
-            # writer.add_figure('feature/spectrogram',mel , step)
+            writer.add_figure('feature/spectrogram',mel , step)
         writer.add_scalar('train/loss', loss, step)
         writer.add_scalar('train/sc_loss', sc_loss, step)
         writer.add_scalar('train/mag_loss', mag_loss, step)
@@ -295,7 +365,7 @@ class PL_diffwav(pl.LightningModule):
         device = audio.device
 
         b, c, t = spectrogram.size()
-        noist = torch.randn(b, 64, t * 512, device=device).type_as(audio)
+        noist = torch.randn(b, 16, t * 512, device=device).type_as(audio)
         # noist=torch.randn(1,8,t*512)
 
         aaac=self(noist,spectrogram)[0]
@@ -370,7 +440,8 @@ if __name__ == "__main__":
     )
     trainer = pl.Trainer(max_epochs=1950, logger=tensorboard, devices=-1, benchmark=True, num_sanity_val_steps=4,
                         # val_check_interval=2000,
-                         callbacks=[checkpoint_callback],check_val_every_n_epoch=1,
+                         callbacks=[checkpoint_callback],  # check_val_every_n_epoch=1,
+                         val_check_interval=500,
                          precision=16
                           #resume_from_checkpoint='./bignet/default/version_25/checkpoints/epoch=134-step=1074397.ckpt'
                          )
