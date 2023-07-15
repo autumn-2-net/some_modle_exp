@@ -71,6 +71,34 @@ class KernelPredictor(nn.Module):
             torch.nn.Conv1d(kpnet_hidden_channels, kpnet_hidden_channels, kpnet_conv_size, padding=padding, bias=True),
             getattr(torch.nn, kpnet_nonlinear_activation)(**kpnet_nonlinear_activation_params),
             torch.nn.Conv1d(kpnet_hidden_channels, kpnet_hidden_channels, kpnet_conv_size, padding=padding, bias=True),
+            getattr(torch.nn, kpnet_nonlinear_activation)(**kpnet_nonlinear_activation_params),
+            torch.nn.Dropout(kpnet_dropout),
+            torch.nn.Conv1d(kpnet_hidden_channels, kpnet_hidden_channels, kpnet_conv_size, padding=padding, bias=True),
+            getattr(torch.nn, kpnet_nonlinear_activation)(**kpnet_nonlinear_activation_params),
+            torch.nn.Conv1d(kpnet_hidden_channels, kpnet_hidden_channels, kpnet_conv_size, padding=padding, bias=True),
+            getattr(torch.nn, kpnet_nonlinear_activation)(**kpnet_nonlinear_activation_params),
+            torch.nn.Dropout(kpnet_dropout),
+            torch.nn.Conv1d(kpnet_hidden_channels, kpnet_hidden_channels, kpnet_conv_size, padding=padding, bias=True),
+            getattr(torch.nn, kpnet_nonlinear_activation)(**kpnet_nonlinear_activation_params),
+            torch.nn.Conv1d(kpnet_hidden_channels, kpnet_hidden_channels, kpnet_conv_size, padding=padding, bias=True),
+            getattr(torch.nn, kpnet_nonlinear_activation)(**kpnet_nonlinear_activation_params),
+        )
+        self.residual_conv2 = torch.nn.Sequential(
+            torch.nn.Dropout(kpnet_dropout),
+            torch.nn.Conv1d(kpnet_hidden_channels, kpnet_hidden_channels, kpnet_conv_size, padding=padding, bias=True),
+            getattr(torch.nn, kpnet_nonlinear_activation)(**kpnet_nonlinear_activation_params),
+            torch.nn.Conv1d(kpnet_hidden_channels, kpnet_hidden_channels, kpnet_conv_size, padding=padding, bias=True),
+            getattr(torch.nn, kpnet_nonlinear_activation)(**kpnet_nonlinear_activation_params),
+            torch.nn.Dropout(kpnet_dropout),
+            torch.nn.Conv1d(kpnet_hidden_channels, kpnet_hidden_channels, kpnet_conv_size, padding=padding, bias=True),
+            getattr(torch.nn, kpnet_nonlinear_activation)(**kpnet_nonlinear_activation_params),
+            torch.nn.Conv1d(kpnet_hidden_channels, kpnet_hidden_channels, kpnet_conv_size, padding=padding, bias=True),
+            getattr(torch.nn, kpnet_nonlinear_activation)(**kpnet_nonlinear_activation_params),
+            torch.nn.Dropout(kpnet_dropout),
+            torch.nn.Conv1d(kpnet_hidden_channels, kpnet_hidden_channels, kpnet_conv_size, padding=padding, bias=True),
+            getattr(torch.nn, kpnet_nonlinear_activation)(**kpnet_nonlinear_activation_params),
+            torch.nn.Conv1d(kpnet_hidden_channels, kpnet_hidden_channels, kpnet_conv_size, padding=padding, bias=True),
+            getattr(torch.nn, kpnet_nonlinear_activation)(**kpnet_nonlinear_activation_params),
         )
 
         self.kernel_conv = torch.nn.Conv1d(kpnet_hidden_channels, kpnet_kernel_channels, kpnet_conv_size,
@@ -88,6 +116,7 @@ class KernelPredictor(nn.Module):
 
         c = self.input_conv(c)
         c = c + self.residual_conv(c)
+        c = c + self.residual_conv2(c)
         k = self.kernel_conv(c)
         b = self.bias_conv(c)
         kernels = k.contiguous().view(batch,
@@ -179,7 +208,7 @@ class LVCBlock(torch.nn.Module):
 
         padding = dilation * int((kernel_size - 1) / 2)
         x = F.pad(x, (padding, padding), 'constant', 0)  # (batch, in_channels, in_length + 2*padding)
-        x = x.unfold(2, hop_size + 2 * padding, hop_size)  # (batch, in_channels, kernel_length, hop_size + 2*padding)
+        x = x.unfold(2, hop_size + 2 * padding, hop_size)  # (batch, in_channels, kernel_length, hop_size + 2*padding) 那个2是维度 不过为什么这里512 会爆竹呢
 
         if hop_size < dilation:
             x = F.pad(x, (0, dilation), 'constant', 0)

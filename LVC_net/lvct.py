@@ -24,22 +24,48 @@ from lvc import tfff
 # from fd.modules import DiffusionDBlock, TimeAware_LVCBlock
 # from fd.sc import V3LSGDRLR
 
+class Upcon(nn.Module):
+
+    def __init__(self):
+        super().__init__()
+        self.UP = torch.nn.ConvTranspose2d(1, 4, [3, 32], stride=[1, 2], padding=[1, 15])
+        self.c1 = torch.nn.Conv2d(4, 4, 3,  padding=1)
+        self.c2 = torch.nn.Conv2d(4, 4, 5,  padding=2)
+        self.cc2 = torch.nn.Conv2d(4, 4, 7, padding=3)
+        self.ccc2 = torch.nn.Conv2d(4, 4, 9, padding=4)
+        self.c3 = torch.nn.Conv2d(4, 1,kernel_size=1)
+
+    def forward(self, x):
+        x = torch.unsqueeze(x, 1)
+        x = self.UP(x)
+        x = F.leaky_relu(x, 0.4)
+        x=F.leaky_relu(self.c1(x), 0.4)+x
+        x = F.leaky_relu(self.c2(x), 0.4) + x
+        x = F.leaky_relu(self.cc2(x), 0.4) + x
+        x = F.leaky_relu(self.ccc2(x), 0.4) + x
+        x = F.leaky_relu(self.c3(x), 0.4)
+
+        # x = self.conv2(x)
+        # x = F.leaky_relu(x, 0.4)
+        spectrogram = torch.squeeze(x, 1)
+        return spectrogram
+
 
 
 class PL_diffwav(pl.LightningModule):
     def __init__(self, params):
         super().__init__()
         self.params = params
-        self.diffwav = LVCNetGenerator(in_channels=1,
+        self.diffwav = LVCNetGenerator(in_channels=64,
                  out_channels=1,
-                 inner_channels=16,
+                 inner_channels=32,
                  cond_channels=128,
-                 cond_hop_length=512,
-                 lvc_block_nums=3,
+                 cond_hop_length=256,
+                 lvc_block_nums=4,
                  lvc_layers_each_block=10,
                  lvc_kernel_size=3,
                  kpnet_hidden_channels=96,
-                 kpnet_conv_size=1,
+                 kpnet_conv_size=3,
                  dropout=0.0,)
 
         # self.model_dir = model_dir
@@ -64,7 +90,7 @@ class PL_diffwav(pl.LightningModule):
 
 
 
-
+        self.UP=Upcon()
 
         # self.loss_fn = nn.MSELoss()
         self.loss_fn = nn.L1Loss()
@@ -78,6 +104,12 @@ class PL_diffwav(pl.LightningModule):
         self.valc = []
 
     def forward(self, audio, spectrogram):
+
+        spectrogram = self.UP(spectrogram)
+
+        # x = self.conv2(x)
+        # x = F.leaky_relu(x, 0.4)
+
 
 
         return self.diffwav(audio,spectrogram)
@@ -110,7 +142,7 @@ class PL_diffwav(pl.LightningModule):
         device = audio.device
 
         b, c, t = spectrogram.size()
-        noist = torch.randn(b, 1, t * 512,device=device).type_as(audio)
+        noist = torch.randn(b, 64, t * 512,device=device).type_as(audio)
 
         aaac = self(noist, spectrogram)
         loss=self.loss_fn(aaac,audio)
@@ -119,7 +151,7 @@ class PL_diffwav(pl.LightningModule):
         if self.global_step %50==0:
             self._write_summary(self.global_step, accc, loss,aaac,loss1,loxs2)
 
-        # loss=loss1+loxs2#+loss
+        loss=loss1+loxs2+loss
 
 
 
@@ -263,7 +295,7 @@ class PL_diffwav(pl.LightningModule):
         device = audio.device
 
         b, c, t = spectrogram.size()
-        noist = torch.randn(b, 1, t * 512, device=device).type_as(audio)
+        noist = torch.randn(b, 64, t * 512, device=device).type_as(audio)
         # noist=torch.randn(1,8,t*512)
 
         aaac=self(noist,spectrogram)[0]
