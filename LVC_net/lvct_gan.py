@@ -16,9 +16,10 @@ from torch.optim.lr_scheduler import MultiStepLR
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
+from model.discriminator import Discriminator
 from scheduler import V3LSGDRLR
 from SWN import SwitchNorm2d
-from T_lvc import LVCNetGenerator
+from T_lvc import LVCNetGenerator, ParallelWaveGANDiscriminator
 from losses import PWGLoss
 from lvc import tfff
 
@@ -141,6 +142,8 @@ class PL_diffwav(pl.LightningModule):
                  kpnet_hidden_channels=96,
                  kpnet_conv_size=3,
                  dropout=0.0,)
+        self.D=ParallelWaveGANDiscriminator()
+        self.D2=Discriminator()
 
         # self.model_dir = model_dir
         # self.model = model
@@ -171,6 +174,8 @@ class PL_diffwav(pl.LightningModule):
         self.val_loss1 = []
         self.val_loss2 = []
         self.valc = []
+        self.automatic_optimization = False
+        self.sidx=0
 
     def forward(self, audio, spectrogram):
 
@@ -204,6 +209,9 @@ class PL_diffwav(pl.LightningModule):
             'audio': batch[0],
             'spectrogram': batch[1]
         }
+        opt_g, opt_d = self.optimizers()
+
+
 
 
         audio = accc['audio'].unsqueeze(1)
@@ -214,20 +222,108 @@ class PL_diffwav(pl.LightningModule):
         noist = torch.randn(b, 16, t * 512,device=device).type_as(audio)
 
         aaac = self(noist, spectrogram)
+        ####################
+        #T D
+        ####################
+
+        TTT=self.D(audio)
+        FFF = self.D(aaac.detach())
+
+        mrdTL=0.0
+        mrdFL = 0.0
+        mpdTL = 0.0
+        mpdFL = 0.0
+        mrdT,mpdT=self.D2(audio)
+        mrdF, mpdF = self.D2(aaac.detach())
+
+        mrdll=len(mrdT)
+        mpdll=len(mpdF)
+
+        for i1, i2 in zip(mrdT,mrdF):
+            mrdTL +=torch.nn.MSELoss()(i1,  torch.ones_like( i1 ))
+            mrdFL+=torch.nn.MSELoss()(i2,  torch.zeros_like(i2))
+        mrdTL=mrdTL/mrdll
+        mrdFL=mrdFL/mrdll
+
+        for i1, i2 in zip(mpdT,mpdF):
+            mpdTL +=torch.nn.MSELoss()(i1,  torch.ones_like( i1 ))
+            mpdFL+=torch.nn.MSELoss()(i2,  torch.zeros_like(i2))
+        mpdTL=mpdTL/mpdll
+        mpdFL=mpdFL/mpdll
+
+        lopp=mrdTL+mrdFL+mpdTL+mpdFL
+
+
+
+            # loss_d += torch.mean(torch.pow(score_real - 1.0, 2))
+            # loss_d += torch.mean(torch.pow(score_fake, 2))
+
+        ################################
+        # D优化
+        ####################################
+        # TTTL,FFFL=self.lossx.discriminator_loss(TTT,FFF)
+        TTTL=torch.nn.MSELoss()(TTT,  torch.ones_like( TTT ))
+        FFFL = torch.nn.MSELoss()(TTT,  torch.zeros_like(FFF))
+
+        losssx=TTTL+FFFL+lopp
+
+        opt_d.zero_grad()
+        self.manual_backward(losssx)
+
+        # print(FFF.grad,TTT,FFF,)
+        opt_d.step()
+
+
+        # G Train
+
+        NNN=self.D(aaac)
+        GmrdL=0.0
+        GmpdL=0.0
+
+        Gmrd, Gmpd = self.D2(aaac)
+        Gmrdn=len(Gmrd)
+        Gmpdn = len(Gmpd)
+        for i1 in Gmrd:
+            GmrdL +=torch.nn.MSELoss()(i1,  torch.ones_like( i1 ))
+        for i1 in Gmpd:
+            GmpdL +=torch.nn.MSELoss()(i1,  torch.ones_like( i1 ))
+
+        GmrdL=GmrdL/Gmrdn
+        GmpdL=GmpdL/Gmpdn
+        mixgl=GmrdL+GmpdL
+
+
+        # GDL=self.lossx.adversarial_loss(NNN)
+        GDL= torch.nn.MSELoss()(NNN,  torch.ones_like(NNN))
+        # print(FFFL, torch.zeros_like(FFF),GDL,torch.ones_like(NNN) )
+
+
+
         loss=self.loss_fn(aaac,audio)
         loss1,loxs2=self.lossx.stft_loss(aaac, audio)
+        # lopp=mrdTL+mrdFL+mpdTL+mpdFL
+        if (1+ self.global_step) %50==0 or self.global_step %50==0 or self.global_step %51==0 or self.global_step ==0 or self.global_step ==1:
+            self._write_summary(self.global_step, accc, loss,aaac,loss1,loxs2,FFFL,TTTL,GDL,mrdTL,mrdFL,mpdTL,mpdFL,GmrdL,GmpdL)
+        # self._write_summary(self.global_step, accc, loss, aaac, loss1, loxs2, FFFL, TTTL, GDL)
 
-        if self.global_step %50==0:
-            self._write_summary(self.global_step, accc, loss,aaac,loss1,loxs2)
+        loss=((loss1+loxs2+loss)*15+GDL*0.9+mixgl)/15
 
-        loss=loss1+loxs2+loss
+        opt_g.zero_grad()
+
+        self.manual_backward(loss)
+        opt_g.step()
 
 
 
-        return loss
+
+
+
+        # return loss
 
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.parameters(), lr=self.params.learning_rate)
+        # optimizer = torch.optim.AdamW(self.parameters(), lr=self.params.learning_rate)
+        opt_g = torch.optim.AdamW((list(self.diffwav.parameters())+list(self.UP.parameters())), lr=self.params.learning_rate)
+        opt_d = torch.optim.AdamW((list(self.D.parameters())+list(self.D2.parameters())), lr=self.params.learning_rate)
         # lt = {
         #     "scheduler": V3LSGDRLR(optimizer,),  # 调度器
         #     "interval": 'step',  # 调度的单位，epoch或step
@@ -236,16 +332,17 @@ class PL_diffwav(pl.LightningModule):
         #     "monitor": "val_loss",  # ReduceLROnPlateau的监控指标
         #     "strict": False  # 如果没有monitor，是否中断训练
         # }
-        return {"optimizer": optimizer,
-                # "lr_scheduler": lt
-                }
+        return [opt_g, opt_d]
+            # {"optimizer": optimizer,
+            #     # "lr_scheduler": lt
+            #     }
 
     # def on_after_backward(self):
     #     self.grad_norm = nn.utils.clip_grad_norm_(self.parameters(), self.params.max_grad_norm or 1e9)
 
     # train
-
-    def _write_summary(self, step, features, loss,pre_audio,sc_loss, mag_loss):  # log 器
+    # mixgl = GmrdL + GmpdL
+    def _write_summary(self, step, features, loss,pre_audio,sc_loss, mag_loss,DFloss,DTloss,G_ganloss,mrdTL,mrdFL,mpdTL,mpdFL,GmrdL,GmpdL):  # log 器
         # tensorboard = self.logger.experiment
         # writer = tensorboard.SummaryWriter
 
@@ -253,8 +350,10 @@ class PL_diffwav(pl.LightningModule):
         # writer.add_audio('feature/audio', features['audio'][0], step, sample_rate=self.params.sample_rate)
 
         # if not self.params.unconditional:
+        self.sidx+=1
 
-        if step %500==0:
+        if self.sidx>=10:
+            self.sidx=0
             writer.add_audio('T_' + '' + '/audio_P', pre_audio[0], step,
                              sample_rate=self.params.sample_rate)
             acccX = tfff.transform(pre_audio[0].detach().cpu().float())[0]
@@ -263,14 +362,27 @@ class PL_diffwav(pl.LightningModule):
                 acccX,
             ],
                 ["PSpectrogram"],
-
             )
-
             # writer.add_figure('val_' + str(self.global_step) + '/spectrogram', mel, idx)
             writer.add_figure('feature/spectrogram',mel , step)
         writer.add_scalar('train/loss', loss, step)
         writer.add_scalar('train/sc_loss', sc_loss, step)
         writer.add_scalar('train/mag_loss', mag_loss, step)
+
+        writer.add_scalar('train/DFloss', DFloss, step)
+        writer.add_scalar('train/DTloss', DTloss, step)
+        writer.add_scalar('train/G_ganloss', G_ganloss, step)
+
+        writer.add_scalar('trainD/mrdTL', mrdTL, step)
+        writer.add_scalar('trainD/mrdFL', mrdFL, step)
+        writer.add_scalar('trainD/mpdTL', mpdTL, step)
+
+        writer.add_scalar('trainD/mpdFL', mpdFL, step)
+        writer.add_scalar('trainD/GmrdL', GmrdL, step)
+        writer.add_scalar('trainD/GmpdL', GmpdL, step)
+
+
+
         writer.add_scalar('train/grad_norm', self.grad_norm, step)
         writer.add_scalar('train/lr', self.lrc, step)
         writer.flush()
@@ -397,7 +509,7 @@ if __name__ == "__main__":
     from lvc.dataset2 import from_path, from_gtzan
     from lvc.params import params
 
-    writer = SummaryWriter("./mdsr_1000sV/", )
+    writer = SummaryWriter("./mdsr_1000sVG/", )
 
     # torch.backends.cuda.matmul.allow_tf32 = True
     # torch.backends.cudnn.allow_tf32 = True
@@ -408,6 +520,11 @@ if __name__ == "__main__":
     dataset = from_path([#'./testwav/',
                         r'K:\dataa\OpenSinger',
         r'C:\Users\autumn\Desktop\poject_all\DiffSinger\data\raw\opencpop\segments\wavs'], params)
+
+    # dataset = from_path([  # './testwav/',
+    #
+    #     r'./ttttttttttt'], params)
+
     # dataset= from_path(['./test/', ], params, ifv=True)
     datasetv = from_path(['./test/', ], params, ifv=True)
     # md = md.load_from_checkpoint('./mdscp/sample-mnist-epoch99-99-37500.ckpt', params=params)
@@ -426,21 +543,22 @@ if __name__ == "__main__":
     #               'diffwav.lvc_blocks.2.fc_t.bias', 'diffwav.lvc_blocks.2.F0x.weight', 'diffwav.lvc_blocks.2.F0x.bias']:
     #         continue
     #     e[ii]=eee[ii]
-    eee = torch.load(r'C:\Users\autumn\Desktop\poject_all\vcoder\LVC_net\mdscpscxV\sample-mnist-epoch03-3-15024.ckpt')[
-        'state_dict']
-    md.load_state_dict(eee,strict=False)
+    # eee = torch.load(r'C:\Users\autumn\Desktop\poject_all\vcoder\LVC_net\mdscpscxV\sample-mnist-epoch03-3-15024.ckpt')[
+    #     'state_dict']
+    # md.load_state_dict(eee,strict=False)
     # md = torch.compile(md)
     checkpoint_callback = ModelCheckpoint(
 
     # monitor = 'val/loss',
 
-    dirpath = './mdscpscxV',
+    dirpath = './mdscpscxVGX',
 
     filename = 'sample-mnist-epoch{epoch:02d}-{epoch}-{step}',
 
-    auto_insert_metric_name = False,every_n_epochs=4,save_top_k = -1
+    auto_insert_metric_name = False,every_n_epochs=2,save_top_k = -1
 
     )
+    aaaa=list(md.parameters())
     trainer = pl.Trainer(max_epochs=1950, logger=tensorboard, devices=-1, benchmark=True, num_sanity_val_steps=4,
                         # val_check_interval=2000,
                          callbacks=[checkpoint_callback],  check_val_every_n_epoch=1,
@@ -449,6 +567,6 @@ if __name__ == "__main__":
                           #resume_from_checkpoint='./bignet/default/version_25/checkpoints/epoch=134-step=1074397.ckpt'
                          )
     trainer.fit(model=md, train_dataloaders=dataset, val_dataloaders=datasetv,
-                #ckpt_path=r'C:\Users\autumn\Desktop\poject_all\vcoder\LVC_net\mdscpscxV\sample-mnist-epoch03-3-15024.ckpt'
+                ckpt_path=r'C:\Users\autumn\Desktop\poject_all\vcoder\LVC_net\mdscpscxVG\sample-mnist-epoch07-7-74928.ckpt'
                 )
 

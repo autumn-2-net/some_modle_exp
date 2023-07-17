@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
+from SWN import SwitchNorm1d
 
 
 # class Conv1d(torch.nn.Conv1d):
@@ -71,36 +71,32 @@ class KernelPredictor(nn.Module):
             torch.nn.Conv1d(kpnet_hidden_channels, kpnet_hidden_channels, kpnet_conv_size, padding=padding, bias=True),
             getattr(torch.nn, kpnet_nonlinear_activation)(**kpnet_nonlinear_activation_params),
             torch.nn.Conv1d(kpnet_hidden_channels, kpnet_hidden_channels, kpnet_conv_size, padding=padding, bias=True),
-            getattr(torch.nn, kpnet_nonlinear_activation)(**kpnet_nonlinear_activation_params),
-            torch.nn.Dropout(kpnet_dropout),
-            torch.nn.Conv1d(kpnet_hidden_channels, kpnet_hidden_channels, kpnet_conv_size, padding=padding, bias=True),
-            getattr(torch.nn, kpnet_nonlinear_activation)(**kpnet_nonlinear_activation_params),
-            torch.nn.Conv1d(kpnet_hidden_channels, kpnet_hidden_channels, kpnet_conv_size, padding=padding, bias=True),
-            getattr(torch.nn, kpnet_nonlinear_activation)(**kpnet_nonlinear_activation_params),
-            torch.nn.Dropout(kpnet_dropout),
-            torch.nn.Conv1d(kpnet_hidden_channels, kpnet_hidden_channels, kpnet_conv_size, padding=padding, bias=True),
-            getattr(torch.nn, kpnet_nonlinear_activation)(**kpnet_nonlinear_activation_params),
-            torch.nn.Conv1d(kpnet_hidden_channels, kpnet_hidden_channels, kpnet_conv_size, padding=padding, bias=True),
-            getattr(torch.nn, kpnet_nonlinear_activation)(**kpnet_nonlinear_activation_params),
         )
         self.residual_conv2 = torch.nn.Sequential(
             torch.nn.Dropout(kpnet_dropout),
             torch.nn.Conv1d(kpnet_hidden_channels, kpnet_hidden_channels, kpnet_conv_size, padding=padding, bias=True),
             getattr(torch.nn, kpnet_nonlinear_activation)(**kpnet_nonlinear_activation_params),
             torch.nn.Conv1d(kpnet_hidden_channels, kpnet_hidden_channels, kpnet_conv_size, padding=padding, bias=True),
-            getattr(torch.nn, kpnet_nonlinear_activation)(**kpnet_nonlinear_activation_params),
+        )
+        self.residual_conv3 = torch.nn.Sequential(
             torch.nn.Dropout(kpnet_dropout),
             torch.nn.Conv1d(kpnet_hidden_channels, kpnet_hidden_channels, kpnet_conv_size, padding=padding, bias=True),
             getattr(torch.nn, kpnet_nonlinear_activation)(**kpnet_nonlinear_activation_params),
             torch.nn.Conv1d(kpnet_hidden_channels, kpnet_hidden_channels, kpnet_conv_size, padding=padding, bias=True),
-            getattr(torch.nn, kpnet_nonlinear_activation)(**kpnet_nonlinear_activation_params),
+        )
+        self.residual_conv4 = torch.nn.Sequential(
             torch.nn.Dropout(kpnet_dropout),
             torch.nn.Conv1d(kpnet_hidden_channels, kpnet_hidden_channels, kpnet_conv_size, padding=padding, bias=True),
             getattr(torch.nn, kpnet_nonlinear_activation)(**kpnet_nonlinear_activation_params),
             torch.nn.Conv1d(kpnet_hidden_channels, kpnet_hidden_channels, kpnet_conv_size, padding=padding, bias=True),
-            getattr(torch.nn, kpnet_nonlinear_activation)(**kpnet_nonlinear_activation_params),
         )
 
+        self.residual_conv5 = torch.nn.Sequential(
+            torch.nn.Dropout(kpnet_dropout),
+            torch.nn.Conv1d(kpnet_hidden_channels, kpnet_hidden_channels, kpnet_conv_size, padding=padding, bias=True),
+            getattr(torch.nn, kpnet_nonlinear_activation)(**kpnet_nonlinear_activation_params),
+            torch.nn.Conv1d(kpnet_hidden_channels, kpnet_hidden_channels, kpnet_conv_size, padding=padding, bias=True),
+        )
         self.kernel_conv = torch.nn.Conv1d(kpnet_hidden_channels, kpnet_kernel_channels, kpnet_conv_size,
                                            padding=padding, bias=True)
         self.bias_conv = torch.nn.Conv1d(kpnet_hidden_channels, kpnet_bias_channels, kpnet_conv_size, padding=padding,
@@ -117,6 +113,9 @@ class KernelPredictor(nn.Module):
         c = self.input_conv(c)
         c = c + self.residual_conv(c)
         c = c + self.residual_conv2(c)
+        c = c + self.residual_conv3(c)
+        c = c + self.residual_conv4(c)
+        c = c + self.residual_conv5(c)
         k = self.kernel_conv(c)
         b = self.bias_conv(c)
         kernels = k.contiguous().view(batch,
@@ -162,6 +161,9 @@ class LVCBlock(torch.nn.Module):
             kpnet_conv_size=kpnet_conv_size,
             kpnet_dropout=kpnet_dropout
         )
+        # self.norm=nn.ModuleList()
+        # for i in range(self.conv_layers):
+        #     self.norm.append(SwitchNorm1d(in_channels))
 
     def forward(self, x, c):
         ''' forward propagation of the location-variable convolutions.
@@ -180,6 +182,7 @@ class LVCBlock(torch.nn.Module):
         kernels, bias = self.kernel_predictor(c)
 
         for i in range(self.conv_layers):
+            # x = self.norm[i](x)
             dilation = 2 ** i
             k = kernels[:, i, :, :, :, :]
             b = bias[:, i, :, :]
@@ -430,14 +433,14 @@ class ParallelWaveGANDiscriminator(torch.nn.Module):
                 conv_in_channels = conv_channels
             padding = (kernel_size - 1) // 2 * dilation
             conv_layer = [
-                Conv1d(conv_in_channels, conv_channels,
+                nn.Conv1d(conv_in_channels, conv_channels,
                        kernel_size=kernel_size, padding=padding,
                        dilation=dilation, bias=bias),
                 getattr(torch.nn, nonlinear_activation)(inplace=True, **nonlinear_activation_params)
             ]
             self.conv_layers += conv_layer
         padding = (kernel_size - 1) // 2
-        last_conv_layer = Conv1d(
+        last_conv_layer =  nn.Conv1d(
             conv_in_channels, out_channels,
             kernel_size=kernel_size, padding=padding, bias=bias)
         self.conv_layers += [last_conv_layer]

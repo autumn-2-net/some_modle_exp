@@ -32,7 +32,7 @@ class ConditionalDataset(torch.utils.data.Dataset):
             print(paths, path)
             self.filenames += glob(f'{path}/**/*.wav', recursive=True)
         if not ikvv:
-            self.filenames=self.filenames*10
+            self.filenames=self.filenames
         # else:
         #     eee=self.filenames.copy()
         #     o=[]
