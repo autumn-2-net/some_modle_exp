@@ -47,7 +47,8 @@ class DiscriminatorR(torch.nn.Module):
 
 
 class MultiResolutionDiscriminator(torch.nn.Module):
-    def __init__(self,resolutions=[(1024, 120, 600), (2048, 240, 1200), (512, 50, 240)],lReLU_slope=0.2):
+    def __init__(self,resolutions=[(1024, 120, 600), (2048, 240, 1200), (512, 50, 240)],lReLU_slope=0.2): # (filter_length, hop_length, win_length)
+        #ffc(1024,256,1024)(2048,512,2048)(512,128,512)
         super(MultiResolutionDiscriminator, self).__init__()
         self.resolutions = resolutions
         self.discriminators = nn.ModuleList(

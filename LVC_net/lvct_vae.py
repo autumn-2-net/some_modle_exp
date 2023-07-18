@@ -27,6 +27,165 @@ from lvc import tfff
 # from fd.modules import DiffusionDBlock, TimeAware_LVCBlock
 # from fd.sc import V3LSGDRLR
 
+
+
+class GLU(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.dim = dim
+
+    def forward(self, x):
+        out, gate = x.chunk(2, dim=self.dim)
+        return out * gate.sigmoid()
+
+class res2dlay(nn.Module):
+    def __init__(self,cd,dilation):
+        super().__init__()
+        assert cd%4==0
+        c=cd//4
+        self.cov2dk3=nn.Conv2d(c,c*2,kernel_size=3,dilation=dilation,padding=(3 + 2 * (dilation - 1)) // 2)
+        self.cov2dk5 = nn.Conv2d(c,c*2,kernel_size=5,dilation=dilation,padding=(5 + 4 * (dilation - 1)) // 2)
+        self.cov2dk7 = nn.Conv2d(c,c*2,kernel_size=7,dilation=dilation,padding=(7 + 6 * (dilation - 1)) // 2)
+        self.cov2dk9 = nn.Conv2d(c,c*2,kernel_size=9,dilation=dilation,padding=(9 + 8 * (dilation - 1)) // 2)
+        self.Glu=GLU(1)
+
+    def forward(self, x:torch.Tensor):
+        inputs=x.chunk(4,dim=1)
+        x1=self.Glu(self.cov2dk3(inputs[0]))
+        x2 = self.Glu(self.cov2dk5(inputs[1]))
+        x3 = self.Glu(self.cov2dk7(inputs[2]))
+        x4= self.Glu(self.cov2dk9(inputs[3]))
+        out=torch.cat([x1,x2,x3,x4],dim=1)
+        return out
+
+class dres2dnlocke(nn.Module):
+    def __init__(self,dim,Dcycle=2,lay=4):
+        super().__init__()
+        self.incov=nn.Conv2d(1,dim*2,kernel_size=1)
+        self.Glu=GLU(1)
+        self.model=nn.ModuleList()
+        for i in range(lay):
+            self.model.append(res2dlay(dim, 2 ** (i % Dcycle)))
+        self.outc=nn.Conv2d(dim,2,kernel_size=1)
+
+    def forward(self,x:torch.Tensor): #b ct->bct
+        x=self.Glu(self.incov(x.unsqueeze(1)))#b ct->b dim c t
+        for i in self.model:
+            x=x+i(x)
+        return self.Glu(self.outc(x)).squeeze(1)#b dim c t->bct
+
+
+class res1dlay(nn.Module):
+    def __init__(self,cd,dilation):
+        super().__init__()
+        assert cd%4==0
+        c=cd//4
+        self.cov2dk3=nn.Conv1d(c,c*2,kernel_size=3,dilation=dilation,padding=(3 + 2 * (dilation - 1)) // 2)
+        self.cov2dk5 = nn.Conv1d(c,c*2,kernel_size=5,dilation=dilation,padding=(5 + 4 * (dilation - 1)) // 2)
+        self.cov2dk7 = nn.Conv1d(c,c*2,kernel_size=7,dilation=dilation,padding=(7 + 6 * (dilation - 1)) // 2)
+        self.cov2dk9 = nn.Conv1d(c,c*2,kernel_size=9,dilation=dilation,padding=(9 + 8 * (dilation - 1)) // 2)
+        self.Glu=GLU(1)
+
+    def forward(self, x:torch.Tensor):
+        inputs=x.chunk(4,dim=1)
+        x1=self.Glu(self.cov2dk3(inputs[0]))
+        x2 = self.Glu(self.cov2dk5(inputs[1]))
+        x3 = self.Glu(self.cov2dk7(inputs[2]))
+        x4= self.Glu(self.cov2dk9(inputs[3]))
+        out=torch.cat([x1,x2,x3,x4],dim=1)
+        return out
+
+class dres1dnlocke(nn.Module):
+    def __init__(self,dim,Dcycle=2,lay=4):
+        super().__init__()
+        # self.incov=nn.Conv1d(1,dim*2,kernel_size=1)
+        self.Glu=GLU(1)
+        self.model=nn.ModuleList()
+        for i in range(lay):
+            self.model.append(res1dlay(dim, 2 ** (i % Dcycle)))
+        # self.outc=nn.Conv1d(dim,2,kernel_size=1)
+
+    def forward(self,x:torch.Tensor): #b ct->bct
+
+        for i in self.model:
+            x=x+i(x)
+        return x
+
+
+class downlay(nn.Module):
+    def __init__(self,indim,outdim,downx=2):
+        super().__init__()
+
+        self.downconv=nn.Conv1d(indim,outdim*2,kernel_size=downx*2,stride=downx,padding=(downx//2))
+        self.glu=GLU(1)
+    def forward(self, x):
+        return self.glu(self.downconv(x))
+
+
+
+
+
+
+
+class encode(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.incov=nn.Conv1d(1,64,kernel_size=1)
+        self.glu=GLU(1)
+        # self.res1=dres1dnlocke(8)
+        self.down1=downlay(32,64,downx=4) #4
+        self.res1d1=dres1dnlocke(32,Dcycle=8,lay=8)
+        self.res2d1=dres2dnlocke(4,Dcycle=2,lay=4)
+
+        self.down2=downlay(64,96,downx=8) #16
+        self.res1d2=dres1dnlocke(48,Dcycle=4,lay=4)
+        self.res2d2=dres2dnlocke(4,Dcycle=2,lay=4)
+
+        self.down3=downlay(96,128,downx=4)#64
+        self.res1d3=dres1dnlocke(64,Dcycle=4,lay=4)
+        self.res2d3=dres2dnlocke(10,Dcycle=2,lay=4)
+
+        self.down4=downlay(128,256,downx=4)#256
+        self.res1d4=dres1dnlocke(128,Dcycle=2,lay=4)
+        self.res2d4=dres2dnlocke(32,Dcycle=2,lay=4)
+
+        # self.down5 = downlay(256, 256, downx=2)#512
+        # self.res1d5 = dres1dnlocke(128, Dcycle=3, lay=6)
+        # self.res2d5 = dres2dnlocke(16, Dcycle=2, lay=4)
+
+        self.outcov = nn.Conv1d(256, 256, kernel_size=1)
+
+    def forward(self, x:torch.Tensor):
+        x1,x2=self.down1(self.glu(self.incov(x))).chunk(2, dim=1)
+        x1=self.res1d1(x1)
+        x2 = self.res2d1(x2)
+
+        x1, x2 = self.down2(torch.cat([x1,x2],dim=1)).chunk(2, dim=1)
+        x1=self.res1d2(x1)
+        x2 = self.res2d2(x2)
+
+        x1, x2 = self.down3(torch.cat([x1,x2],dim=1)).chunk(2, dim=1)
+        x1=self.res1d3(x1)
+        x2 = self.res2d3(x2)
+
+        x1, x2 = self.down4(torch.cat([x1,x2],dim=1)).chunk(2, dim=1)
+        x1=self.res1d4(x1)
+        x2 = self.res2d4(x2)
+
+        # x1, x2 = self.down5(torch.cat([x1,x2],dim=1)).chunk(2, dim=1)
+        # x1=self.res1d5(x1)
+        # x2 = self.res2d5(x2)
+
+        x= self.glu(self.outcov(torch.cat([x1,x2],dim=1)))
+        return x
+#
+# rends=encode().cuda()
+# ppp=torch.randn(10,1,512*62).cuda()
+# outt=rends(ppp)
+# print(outt.size())
+
+
+
 class Upcon(nn.Module):
 
     def __init__(self):
@@ -52,14 +211,7 @@ class Upcon(nn.Module):
         # x = F.leaky_relu(x, 0.4)
         spectrogram = torch.squeeze(x, 1)
         return spectrogram
-class GLU(nn.Module):
-    def __init__(self, dim):
-        super().__init__()
-        self.dim = dim
 
-    def forward(self, x):
-        out, gate = x.chunk(2, dim=self.dim)
-        return out * gate.sigmoid()
 
 class covD(nn.Module):
     def __init__(self,C,D):
@@ -138,12 +290,13 @@ class PL_diffwav(pl.LightningModule):
                  cond_hop_length=256,
                  lvc_block_nums=3,#这个有点问题
                  lvc_layers_each_block=10, #这个不能动
-                 lvc_kernel_size=9,# 9或者7较好
+                 lvc_kernel_size=7,# 9或者7较好
                  kpnet_hidden_channels=96,
                  kpnet_conv_size=3,
                  dropout=0.0,)
         self.D=ParallelWaveGANDiscriminator()
-        self.D2=Discriminator()
+        self.D2=Discriminator(mrd_resolutions=[(1024, 120, 600), (2048, 240, 1200), (512, 50, 240), (4096, 128, 4096)])
+        self.encode=encode()
 
         # self.model_dir = model_dir
         # self.model = model
@@ -177,8 +330,8 @@ class PL_diffwav(pl.LightningModule):
         self.automatic_optimization = False
         self.sidx=0
 
-    def forward(self, audio, spectrogram):
-
+    def forward(self, audio,noise):
+        spectrogram=self.encode(audio)
         spectrogram = self.UP(spectrogram)
 
         # x = self.conv2(x)
@@ -186,7 +339,7 @@ class PL_diffwav(pl.LightningModule):
 
 
 
-        return self.diffwav(audio,spectrogram)
+        return self.diffwav(noise,spectrogram)
 
     def on_before_zero_grad(self, optimizer):
         # print(optimizer.state_dict()['param_groups'][0]['lr'],self.global_step)
@@ -221,7 +374,7 @@ class PL_diffwav(pl.LightningModule):
         b, c, t = spectrogram.size()
         noist = torch.randn(b, 16, t * 512,device=device).type_as(audio)
 
-        aaac = self(noist, spectrogram)
+        aaac = self(audio,noist)
         ####################
         #T D
         ####################
@@ -306,7 +459,7 @@ class PL_diffwav(pl.LightningModule):
             self._write_summary(self.global_step, accc, loss,aaac,loss1,loxs2,FFFL,TTTL,GDL,mrdTL,mrdFL,mpdTL,mpdFL,GmrdL,GmpdL)
         # self._write_summary(self.global_step, accc, loss, aaac, loss1, loxs2, FFFL, TTTL, GDL)
 
-        loss=((loss1+loxs2+loss)*2+GDL*1+mixgl)/4
+        loss=((loss1+loxs2+loss)*100+GDL*1+mixgl)/100
 
         opt_g.zero_grad()
 
@@ -322,7 +475,7 @@ class PL_diffwav(pl.LightningModule):
 
     def configure_optimizers(self):
         # optimizer = torch.optim.AdamW(self.parameters(), lr=self.params.learning_rate)
-        opt_g = torch.optim.AdamW((list(self.diffwav.parameters())+list(self.UP.parameters())), lr=self.params.learning_rate)
+        opt_g = torch.optim.AdamW((list(self.diffwav.parameters())+list(self.encode.parameters())+list(self.UP.parameters())), lr=self.params.learning_rate)
         opt_d = torch.optim.AdamW((list(self.D.parameters())+list(self.D2.parameters())), lr=self.params.learning_rate)
         # lt = {
         #     "scheduler": V3LSGDRLR(optimizer,),  # 调度器
@@ -482,7 +635,7 @@ class PL_diffwav(pl.LightningModule):
             noist = torch.randn(b, 16, t * 512, device=device).type_as(audio)
             # noist=torch.randn(1,8,t*512)
 
-            aaac=self(noist,spectrogram)[0]
+            aaac=self(audio.unsqueeze(1),noist)[0]
             loss1,loxs2=self.lossx.stft_loss(aaac, audio)
             # aaac, opo = self.predict(spectrogram,f0, fast_sampling=False)
             loss = self.loss_fn(aaac, audio)
@@ -510,7 +663,7 @@ if __name__ == "__main__":
     from lvc.dataset2 import from_path, from_gtzan
     from lvc.params import params
 
-    writer = SummaryWriter("./mdsr_1000sVG/", )
+    writer = SummaryWriter("./mdsr_1000sVGvae/", )
 
     # torch.backends.cuda.matmul.allow_tf32 = True
     # torch.backends.cudnn.allow_tf32 = True
@@ -554,7 +707,7 @@ if __name__ == "__main__":
 
     # monitor = 'val/loss',
 
-    dirpath = './mdscpscxVGX',
+    dirpath = './mdscpscxVGXvae',
 
     filename = 'sample-mnist-epoch{epoch:02d}-{epoch}-{step}',
 
@@ -570,6 +723,6 @@ if __name__ == "__main__":
                           #resume_from_checkpoint='./bignet/default/version_25/checkpoints/epoch=134-step=1074397.ckpt'
                          )
     trainer.fit(model=md, train_dataloaders=dataset, val_dataloaders=datasetv,
-                ckpt_path=r'C:\Users\autumn\Desktop\poject_all\vcoder\LVC_net\mdscpscxVGX\sample-mnist-epoch23-23-242244.ckpt'
+                # ckpt_path=r'C:\Users\autumn\Desktop\poject_all\vcoder\LVC_net\mdscpscxVGX\sample-mnist-epoch23-23-242244.ckpt'
                 )
 
