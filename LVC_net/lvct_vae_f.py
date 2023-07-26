@@ -18,7 +18,7 @@ from tqdm import tqdm
 
 from model.discriminator import Discriminator
 from scheduler import V3LSGDRLR
-from SWN import SwitchNorm2d
+from SWN import SwitchNorm2d, SwitchNorm1d
 from T_lvc import LVCNetGenerator, ParallelWaveGANDiscriminator
 from losses import PWGLoss
 from lvc import tfff
@@ -64,14 +64,16 @@ class dres2dnlocke(nn.Module):
         self.incov=nn.Conv2d(1,dim*2,kernel_size=1)
         self.Glu=GLU(1)
         self.model=nn.ModuleList()
+        self.norm = nn.ModuleList()
         for i in range(lay):
             self.model.append(res2dlay(dim, 2 ** (i % Dcycle)))
+            self.norm.append(SwitchNorm2d(dim))
         self.outc=nn.Conv2d(dim,2,kernel_size=1)
 
     def forward(self,x:torch.Tensor): #b ct->bct
         x=self.Glu(self.incov(x.unsqueeze(1)))#b ct->b dim c t
-        for i in self.model:
-            x=x+i(x)
+        for i ,n in zip(self.model,self.norm):
+            x=x+n(i(x))
         return self.Glu(self.outc(x)).squeeze(1)#b dim c t->bct
 
 
@@ -101,14 +103,16 @@ class dres1dnlocke(nn.Module):
         # self.incov=nn.Conv1d(1,dim*2,kernel_size=1)
         self.Glu=GLU(1)
         self.model=nn.ModuleList()
+        self.norm = nn.ModuleList()
         for i in range(lay):
             self.model.append(res1dlay(dim, 2 ** (i % Dcycle)))
+            self.norm.append(SwitchNorm1d(dim))
         # self.outc=nn.Conv1d(dim,2,kernel_size=1)
 
     def forward(self,x:torch.Tensor): #b ct->bct
 
-        for i in self.model:
-            x=x+i(x)
+        for i, n in zip(self.model, self.norm):
+            x = x + n(i(x))
         return x
 
 
@@ -143,11 +147,11 @@ class encode(nn.Module):
 
         self.down3=downlay(96,128,downx=4)#64
         self.res1d3=dres1dnlocke(64,Dcycle=4,lay=4)
-        self.res2d3=dres2dnlocke(12,Dcycle=2,lay=4)
+        self.res2d3=dres2dnlocke(8,Dcycle=2,lay=4)
 
         self.down4=downlay(128,256,downx=4)#256
         self.res1d4=dres1dnlocke(128,Dcycle=2,lay=4)
-        self.res2d4=dres2dnlocke(32,Dcycle=2,lay=4)
+        self.res2d4=dres2dnlocke(16,Dcycle=2,lay=4)
 
         # self.down5 = downlay(256, 256, downx=2)#512
         # self.res1d5 = dres1dnlocke(128, Dcycle=3, lay=6)
@@ -375,80 +379,80 @@ class PL_diffwav(pl.LightningModule):
         noist = torch.randn(b, 16, t * 512,device=device).type_as(audio)
 
         aaac = self(audio,noist)
-        ####################
-        #T D
-        ####################
-
-        TTT=self.D(audio)
-        FFF = self.D(aaac.detach())
-
-        mrdTL=0.0
-        mrdFL = 0.0
-        mpdTL = 0.0
-        mpdFL = 0.0
-        mrdT,mpdT=self.D2(audio)
-        mrdF, mpdF = self.D2(aaac.detach())
-
-        mrdll=len(mrdT)
-        mpdll=len(mpdF)
-
-        for i1, i2 in zip(mrdT,mrdF):
-            mrdTL +=torch.nn.MSELoss()(i1,  torch.ones_like( i1 ))
-            mrdFL+=torch.nn.MSELoss()(i2,  torch.zeros_like(i2))
-        mrdTL=mrdTL/mrdll
-        mrdFL=mrdFL/mrdll
-
-        for i1, i2 in zip(mpdT,mpdF):
-            mpdTL +=torch.nn.MSELoss()(i1,  torch.ones_like( i1 ))
-            mpdFL+=torch.nn.MSELoss()(i2,  torch.zeros_like(i2))
-        mpdTL=mpdTL/mpdll
-        mpdFL=mpdFL/mpdll
-
-        lopp=mrdTL+mrdFL+mpdTL+mpdFL
-
-
-
-            # loss_d += torch.mean(torch.pow(score_real - 1.0, 2))
-            # loss_d += torch.mean(torch.pow(score_fake, 2))
-
-        ################################
-        # D优化
-        ####################################
-        # TTTL,FFFL=self.lossx.discriminator_loss(TTT,FFF)
-        TTTL=torch.nn.MSELoss()(TTT,  torch.ones_like( TTT ))
-        FFFL = torch.nn.MSELoss()(TTT,  torch.zeros_like(FFF))
-
-        losssx=TTTL+FFFL+lopp
-
-        opt_d.zero_grad()
-        self.manual_backward(losssx)
-
-        # print(FFF.grad,TTT,FFF,)
-        opt_d.step()
-
-
-        # G Train
-
-        NNN=self.D(aaac)
-        GmrdL=0.0
-        GmpdL=0.0
-
-        Gmrd, Gmpd = self.D2(aaac)
-        Gmrdn=len(Gmrd)
-        Gmpdn = len(Gmpd)
-        for i1 in Gmrd:
-            GmrdL +=torch.nn.MSELoss()(i1,  torch.ones_like( i1 ))
-        for i1 in Gmpd:
-            GmpdL +=torch.nn.MSELoss()(i1,  torch.ones_like( i1 ))
-
-        GmrdL=GmrdL/Gmrdn
-        GmpdL=GmpdL/Gmpdn
-        mixgl=GmrdL+GmpdL
-
-
-        # GDL=self.lossx.adversarial_loss(NNN)
-        GDL= torch.nn.MSELoss()(NNN,  torch.ones_like(NNN))
-        # print(FFFL, torch.zeros_like(FFF),GDL,torch.ones_like(NNN) )
+        # ####################
+        # #T D
+        # ####################
+        #
+        # TTT=self.D(audio)
+        # FFF = self.D(aaac.detach())
+        #
+        # mrdTL=0.0
+        # mrdFL = 0.0
+        # mpdTL = 0.0
+        # mpdFL = 0.0
+        # mrdT,mpdT=self.D2(audio)
+        # mrdF, mpdF = self.D2(aaac.detach())
+        #
+        # mrdll=len(mrdT)
+        # mpdll=len(mpdF)
+        #
+        # for i1, i2 in zip(mrdT,mrdF):
+        #     mrdTL +=torch.nn.MSELoss()(i1,  torch.ones_like( i1 ))
+        #     mrdFL+=torch.nn.MSELoss()(i2,  torch.zeros_like(i2))
+        # mrdTL=mrdTL/mrdll
+        # mrdFL=mrdFL/mrdll
+        #
+        # for i1, i2 in zip(mpdT,mpdF):
+        #     mpdTL +=torch.nn.MSELoss()(i1,  torch.ones_like( i1 ))
+        #     mpdFL+=torch.nn.MSELoss()(i2,  torch.zeros_like(i2))
+        # mpdTL=mpdTL/mpdll
+        # mpdFL=mpdFL/mpdll
+        #
+        # lopp=mrdTL+mrdFL+mpdTL+mpdFL
+        #
+        #
+        #
+        #     # loss_d += torch.mean(torch.pow(score_real - 1.0, 2))
+        #     # loss_d += torch.mean(torch.pow(score_fake, 2))
+        #
+        # ################################
+        # # D优化
+        # ####################################
+        # # TTTL,FFFL=self.lossx.discriminator_loss(TTT,FFF)
+        # TTTL=torch.nn.MSELoss()(TTT,  torch.ones_like( TTT ))
+        # FFFL = torch.nn.MSELoss()(TTT,  torch.zeros_like(FFF))
+        #
+        # losssx=TTTL+FFFL+lopp
+        #
+        # opt_d.zero_grad()
+        # self.manual_backward(losssx)
+        #
+        # # print(FFF.grad,TTT,FFF,)
+        # opt_d.step()
+        #
+        #
+        # # G Train
+        #
+        # NNN=self.D(aaac)
+        # GmrdL=0.0
+        # GmpdL=0.0
+        #
+        # Gmrd, Gmpd = self.D2(aaac)
+        # Gmrdn=len(Gmrd)
+        # Gmpdn = len(Gmpd)
+        # for i1 in Gmrd:
+        #     GmrdL +=torch.nn.MSELoss()(i1,  torch.ones_like( i1 ))
+        # for i1 in Gmpd:
+        #     GmpdL +=torch.nn.MSELoss()(i1,  torch.ones_like( i1 ))
+        #
+        # GmrdL=GmrdL/Gmrdn
+        # GmpdL=GmpdL/Gmpdn
+        # mixgl=GmrdL+GmpdL
+        #
+        #
+        # # GDL=self.lossx.adversarial_loss(NNN)
+        # GDL= torch.nn.MSELoss()(NNN,  torch.ones_like(NNN))
+        # # print(FFFL, torch.zeros_like(FFF),GDL,torch.ones_like(NNN) )
 
 
 
@@ -456,10 +460,10 @@ class PL_diffwav(pl.LightningModule):
         loss1,loxs2=self.lossx.stft_loss(aaac, audio)
         # lopp=mrdTL+mrdFL+mpdTL+mpdFL
         if (1+ self.global_step) %50==0 or self.global_step %50==0 or self.global_step %51==0 or self.global_step ==0 or self.global_step ==1:
-            self._write_summary(self.global_step, accc, loss,aaac,loss1,loxs2,FFFL,TTTL,GDL,mrdTL,mrdFL,mpdTL,mpdFL,GmrdL,GmpdL)
+            self._write_summary(self.global_step, accc, loss,aaac,loss1,loxs2,)
         # self._write_summary(self.global_step, accc, loss, aaac, loss1, loxs2, FFFL, TTTL, GDL)
 
-        loss=((loss1+loxs2+loss)*100+GDL*1+mixgl)/100
+        loss=loss1+loxs2*0.3+loss
 
         opt_g.zero_grad()
 
@@ -495,7 +499,7 @@ class PL_diffwav(pl.LightningModule):
 
     # train
     # mixgl = GmrdL + GmpdL
-    def _write_summary(self, step, features, loss,pre_audio,sc_loss, mag_loss,DFloss,DTloss,G_ganloss,mrdTL,mrdFL,mpdTL,mpdFL,GmrdL,GmpdL):  # log 器
+    def _write_summary(self, step, features, loss,pre_audio,sc_loss, mag_loss,):  # log 器
         # tensorboard = self.logger.experiment
         # writer = tensorboard.SummaryWriter
 
@@ -521,19 +525,6 @@ class PL_diffwav(pl.LightningModule):
         writer.add_scalar('train/loss', loss, step)
         writer.add_scalar('train/sc_loss', sc_loss, step)
         writer.add_scalar('train/mag_loss', mag_loss, step)
-
-        writer.add_scalar('train/DFloss', DFloss, step)
-        writer.add_scalar('train/DTloss', DTloss, step)
-        writer.add_scalar('train/G_ganloss', G_ganloss, step)
-
-        writer.add_scalar('trainD/mrdTL', mrdTL, step)
-        writer.add_scalar('trainD/mrdFL', mrdFL, step)
-        writer.add_scalar('trainD/mpdTL', mpdTL, step)
-
-        writer.add_scalar('trainD/mpdFL', mpdFL, step)
-        writer.add_scalar('trainD/GmrdL', GmrdL, step)
-        writer.add_scalar('trainD/GmpdL', GmpdL, step)
-
 
 
         writer.add_scalar('train/grad_norm', self.grad_norm, step)
@@ -663,7 +654,7 @@ if __name__ == "__main__":
     from lvc.dataset2 import from_path, from_gtzan
     from lvc.params import params
 
-    writer = SummaryWriter("./mdsr_1000sVGvae/", )
+    writer = SummaryWriter("./mdsr_1000sVGvaeF/", )
 
     # torch.backends.cuda.matmul.allow_tf32 = True
     # torch.backends.cudnn.allow_tf32 = True
@@ -707,7 +698,7 @@ if __name__ == "__main__":
 
     # monitor = 'val/loss',
 
-    dirpath = './mdscpscxVGXvae',
+    dirpath = './mdscpscxVGXvaeF',
 
     filename = 'sample-mnist-epoch{epoch:02d}-{epoch}-{step}',
 
@@ -715,7 +706,7 @@ if __name__ == "__main__":
 
     )
     aaaa=list(md.parameters())
-    trainer = pl.Trainer(max_epochs=1950, logger=tensorboard, devices=-1, benchmark=True, num_sanity_val_steps=-1,
+    trainer = pl.Trainer(max_epochs=1950, logger=tensorboard, devices=-1, benchmark=True, num_sanity_val_steps=10,
                         # val_check_interval=2000,
                          callbacks=[checkpoint_callback],  check_val_every_n_epoch=1,
                          #val_check_interval=500,

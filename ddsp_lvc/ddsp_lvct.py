@@ -16,16 +16,52 @@ from torch.optim.lr_scheduler import MultiStepLR
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
-from model.discriminator import Discriminator
+from ddsp.pcmer import PCmer
+
 from scheduler import V3LSGDRLR
 from SWN import SwitchNorm2d
-from T_lvc import LVCNetGenerator, ParallelWaveGANDiscriminator
+from T_lvc import LVCNetGenerator
 from losses import PWGLoss
 from lvc import tfff
 
 # tensorboard = pl_loggers.TensorBoardLogger(save_dir="")
 # from fd.modules import DiffusionDBlock, TimeAware_LVCBlock
 # from fd.sc import V3LSGDRLR
+from logger import utils
+from ddsp.vocoder import Sins, CombSub
+from ddsp.loss import HybridLoss
+class ddsp_adp(nn.Module):
+    def __init__(self,args):
+        super().__init__()
+
+        if args.model.type == 'Sins':
+            self.ddsp_model = Sins(
+                sampling_rate=args.data.sampling_rate,
+                block_size=args.data.block_size,
+                n_harmonics=args.model.n_harmonics,
+                n_mag_allpass=args.model.n_mag_allpass,
+                n_mag_noise=args.model.n_mag_noise,
+                n_mels=args.data.n_mels)
+
+        elif args.model.type == 'CombSub':
+            self.ddsp_model = CombSub(
+                sampling_rate=args.data.sampling_rate,
+                block_size=args.data.block_size,
+                n_mag_allpass=args.model.n_mag_allpass,
+                n_mag_harmonic=args.model.n_mag_harmonic,
+                n_mag_noise=args.model.n_mag_noise,
+                n_mels=args.data.n_mels)
+
+        else:
+            raise ValueError(f" [x] Unknown Model: {args.model.type}")
+        self.args=args
+        self.loss=HybridLoss(args.data.block_size, args.loss.fft_min, args.loss.fft_max, args.loss.n_scale, args.loss.lambda_uv, args.device)
+    def forward(self,mel,f0:torch.tensor,):
+        signal, _, (s_h, s_n) = self.ddsp_model(mel.transpose(1,2), f0.unsqueeze(2), max_upsample_dim=self.args.train.max_upsample_dim)
+
+        # loss
+
+        return signal,s_h
 
 class Upcon(nn.Module):
 
@@ -85,6 +121,17 @@ class UpconD(nn.Module):
 
     def __init__(self):
         super().__init__()
+        self.cfc=PCmer( num_layers=3,
+            num_heads=8,
+            dim_model=256,
+            dim_keys=256,
+            dim_values=256,
+            residual_dropout=0.1,
+            attention_dropout=0.1)
+
+        self.linnn=nn.Linear(128,256)
+        self.linnnss= nn.Linear(256, 128)
+
         self.c1 = torch.nn.Conv2d(1, 8, kernel_size=1)
         self.UP = torch.nn.ConvTranspose2d(4, 8, [3, 32], stride=[1, 2], padding=[1, 15])
         self.Glu = GLU(1)
@@ -106,6 +153,10 @@ class UpconD(nn.Module):
 
 
     def forward(self, x):
+        x=self.linnnss(self.cfc(self.linnn(x.transpose(1,2)))).transpose(1,2)
+
+
+
         x = torch.unsqueeze(x, 1)
         x=self.Glu (self.c1(x))
         # x=self.net(x)
@@ -128,12 +179,12 @@ class UpconD(nn.Module):
 
 
 class PL_diffwav(pl.LightningModule):
-    def __init__(self, params):
+    def __init__(self, params,argxs):
         super().__init__()
         self.params = params
-        self.diffwav = LVCNetGenerator(in_channels=16,
+        self.diffwav = LVCNetGenerator(in_channels=1,
                  out_channels=1,
-                 inner_channels=18,#不知道10压不压住 441
+                 inner_channels=16,#不知道10压不压住 441
                  cond_channels=128,
                  cond_hop_length=256,
                  lvc_block_nums=3,#这个有点问题
@@ -142,8 +193,6 @@ class PL_diffwav(pl.LightningModule):
                  kpnet_hidden_channels=96,
                  kpnet_conv_size=3,
                  dropout=0.0,)
-        self.D=ParallelWaveGANDiscriminator()
-        self.D2=Discriminator()
 
         # self.model_dir = model_dir
         # self.model = model
@@ -152,6 +201,9 @@ class PL_diffwav(pl.LightningModule):
         # self.params = params
         # self.autocast = torch.cuda.amp.autocast(enabled=kwargs.get('fp16', False))
         # self.scaler = torch.cuda.amp.GradScaler(enabled=kwargs.get('fp16', False))
+
+        self.ddsp = ddsp_adp(args=argxs)
+
         self.step = 0
         self.is_master = True
         self.lossx=PWGLoss(stft_loss_params={
@@ -163,6 +215,8 @@ class PL_diffwav(pl.LightningModule):
 
 
         self.UP=UpconD()
+        args = argxs
+        self.args = argxs
 
         # self.loss_fn = nn.MSELoss()
         self.loss_fn = nn.L1Loss()
@@ -174,10 +228,14 @@ class PL_diffwav(pl.LightningModule):
         self.val_loss1 = []
         self.val_loss2 = []
         self.valc = []
-        self.automatic_optimization = False
-        self.sidx=0
 
-    def forward(self, audio, spectrogram):
+        self.loss = HybridLoss(args.data.block_size, args.loss.fft_min, args.loss.fft_max, args.loss.n_scale,
+                               args.loss.lambda_uv, args.device)
+
+    def forward(self, audio, spectrogram,f0):
+
+        wavv,s_h=self.ddsp(spectrogram,f0,)
+        wavv=wavv.type_as(audio)
 
         spectrogram = self.UP(spectrogram)
 
@@ -186,7 +244,7 @@ class PL_diffwav(pl.LightningModule):
 
 
 
-        return self.diffwav(audio,spectrogram)
+        return self.diffwav(wavv.unsqueeze(1),spectrogram),wavv,s_h
 
     def on_before_zero_grad(self, optimizer):
         # print(optimizer.state_dict()['param_groups'][0]['lr'],self.global_step)
@@ -207,11 +265,8 @@ class PL_diffwav(pl.LightningModule):
         pass
         accc = {
             'audio': batch[0],
-            'spectrogram': batch[1]
+            'spectrogram': batch[1],'f0': batch[2],'uv': batch[3],
         }
-        opt_g, opt_d = self.optimizers()
-
-
 
 
         audio = accc['audio'].unsqueeze(1)
@@ -221,109 +276,34 @@ class PL_diffwav(pl.LightningModule):
         b, c, t = spectrogram.size()
         noist = torch.randn(b, 16, t * 512,device=device).type_as(audio)
 
-        aaac = self(noist, spectrogram)
-        ####################
-        #T D
-        ####################
+        aaac ,wavv,s_h= self(noist, spectrogram,batch[2])
+        detach_uv = False
+        if self.global_step < self.args.loss.detach_uv_step:
+            detach_uv = True
 
-        TTT=self.D(audio)
-        FFF = self.D(aaac.detach())
-
-        mrdTL=0.0
-        mrdFL = 0.0
-        mpdTL = 0.0
-        mpdFL = 0.0
-        mrdT,mpdT=self.D2(audio)
-        mrdF, mpdF = self.D2(aaac.detach())
-
-        mrdll=len(mrdT)
-        mpdll=len(mpdF)
-
-        for i1, i2 in zip(mrdT,mrdF):
-            mrdTL +=torch.nn.MSELoss()(i1,  torch.ones_like( i1 ))
-            mrdFL+=torch.nn.MSELoss()(i2,  torch.zeros_like(i2))
-        mrdTL=mrdTL/mrdll
-        mrdFL=mrdFL/mrdll
-
-        for i1, i2 in zip(mpdT,mpdF):
-            mpdTL +=torch.nn.MSELoss()(i1,  torch.ones_like( i1 ))
-            mpdFL+=torch.nn.MSELoss()(i2,  torch.zeros_like(i2))
-        mpdTL=mpdTL/mpdll
-        mpdFL=mpdFL/mpdll
-
-        lopp=mrdTL+mrdFL+mpdTL+mpdFL
-
-
-
-            # loss_d += torch.mean(torch.pow(score_real - 1.0, 2))
-            # loss_d += torch.mean(torch.pow(score_fake, 2))
-
-        ################################
-        # D优化
-        ####################################
-        # TTTL,FFFL=self.lossx.discriminator_loss(TTT,FFF)
-        TTTL=torch.nn.MSELoss()(TTT,  torch.ones_like( TTT ))
-        FFFL = torch.nn.MSELoss()(TTT,  torch.zeros_like(FFF))
-
-        losssx=TTTL+FFFL+lopp
-
-        opt_d.zero_grad()
-        self.manual_backward(losssx)
-
-        # print(FFF.grad,TTT,FFF,)
-        opt_d.step()
-
-
-        # G Train
-
-        NNN=self.D(aaac)
-        GmrdL=0.0
-        GmpdL=0.0
-
-        Gmrd, Gmpd = self.D2(aaac)
-        Gmrdn=len(Gmrd)
-        Gmpdn = len(Gmpd)
-        for i1 in Gmrd:
-            GmrdL +=torch.nn.MSELoss()(i1,  torch.ones_like( i1 ))
-        for i1 in Gmpd:
-            GmpdL +=torch.nn.MSELoss()(i1,  torch.ones_like( i1 ))
-
-        GmrdL=GmrdL/Gmrdn
-        GmpdL=GmpdL/Gmpdn
-        mixgl=GmrdL+GmpdL
-
-
-        # GDL=self.lossx.adversarial_loss(NNN)
-        GDL= torch.nn.MSELoss()(NNN,  torch.ones_like(NNN))
-        # print(FFFL, torch.zeros_like(FFF),GDL,torch.ones_like(NNN) )
-
+        losscc, (loss_rss, loss_uv) = self.loss(wavv, s_h, audio.squeeze(1), accc['uv'], detach_uv=detach_uv,
+                                              uv_tolerance=self.args.loss.uv_tolerance)
 
 
         loss=self.loss_fn(aaac,audio)
         loss1,loxs2=self.lossx.stft_loss(aaac, audio)
-        # lopp=mrdTL+mrdFL+mpdTL+mpdFL
-        if (1+ self.global_step) %50==0 or self.global_step %50==0 or self.global_step %51==0 or self.global_step ==0 or self.global_step ==1:
-            self._write_summary(self.global_step, accc, loss,aaac,loss1,loxs2,FFFL,TTTL,GDL,mrdTL,mrdFL,mpdTL,mpdFL,GmrdL,GmpdL)
-        # self._write_summary(self.global_step, accc, loss, aaac, loss1, loxs2, FFFL, TTTL, GDL)
 
-        loss=((loss1+loxs2+loss)*2+GDL*1+mixgl)/4
+        if self.global_step %50==0:
+            self._write_summary(self.global_step, accc, loss,aaac,loss1,loxs2,losscc,wavv.unsqueeze(1))
 
-        opt_g.zero_grad()
 
-        self.manual_backward(loss)
-        opt_g.step()
+        if loss>0.8:
+            loss = loss1 + loxs2 + loss*0.2 + losscc
+        else:
+            loss = loss1 + loxs2 + loss  + losscc
 
 
 
 
-
-
-        # return loss
+        return loss
 
     def configure_optimizers(self):
-        # optimizer = torch.optim.AdamW(self.parameters(), lr=self.params.learning_rate)
-        opt_g = torch.optim.AdamW((list(self.diffwav.parameters())+list(self.UP.parameters())), lr=self.params.learning_rate)
-        opt_d = torch.optim.AdamW((list(self.D.parameters())+list(self.D2.parameters())), lr=self.params.learning_rate)
+        optimizer = torch.optim.AdamW(self.parameters(), lr=self.params.learning_rate)
         # lt = {
         #     "scheduler": V3LSGDRLR(optimizer,),  # 调度器
         #     "interval": 'step',  # 调度的单位，epoch或step
@@ -332,17 +312,16 @@ class PL_diffwav(pl.LightningModule):
         #     "monitor": "val_loss",  # ReduceLROnPlateau的监控指标
         #     "strict": False  # 如果没有monitor，是否中断训练
         # }
-        return [opt_g, opt_d]
-            # {"optimizer": optimizer,
-            #     # "lr_scheduler": lt
-            #     }
+        return {"optimizer": optimizer,
+                # "lr_scheduler": lt
+                }
 
     # def on_after_backward(self):
     #     self.grad_norm = nn.utils.clip_grad_norm_(self.parameters(), self.params.max_grad_norm or 1e9)
 
     # train
-    # mixgl = GmrdL + GmpdL
-    def _write_summary(self, step, features, loss,pre_audio,sc_loss, mag_loss,DFloss,DTloss,G_ganloss,mrdTL,mrdFL,mpdTL,mpdFL,GmrdL,GmpdL):  # log 器
+
+    def _write_summary(self, step, features, loss,pre_audio,sc_loss, mag_loss,ddsp_loss,dddpw):  # log 器
         # tensorboard = self.logger.experiment
         # writer = tensorboard.SummaryWriter
 
@@ -350,39 +329,29 @@ class PL_diffwav(pl.LightningModule):
         # writer.add_audio('feature/audio', features['audio'][0], step, sample_rate=self.params.sample_rate)
 
         # if not self.params.unconditional:
-        self.sidx+=1
 
-        if self.sidx>=15:
-            self.sidx=0
+        if step %500==0:
             writer.add_audio('T_' + '' + '/audio_P', pre_audio[0], step,
                              sample_rate=self.params.sample_rate)
+            writer.add_audio('T_' + '' + '/audio_Pddsp', dddpw[0], step,
+                             sample_rate=self.params.sample_rate)
             acccX = tfff.transform(pre_audio[0].detach().cpu().float())[0]
+            cccX = tfff.transform(dddpw[0].detach().cpu().float())[0]
             mel = self.plot_mel([
 
-                acccX,
+                acccX,cccX
             ],
-                ["PSpectrogram"],
+                ["PSpectrogram",'ddsp'],
+
             )
+
             # writer.add_figure('val_' + str(self.global_step) + '/spectrogram', mel, idx)
             writer.add_figure('feature/spectrogram',mel , step)
-        writer.add_scalar('train/loss', loss, step)
+        writer.add_scalar('train/ddsploss', loss, step)
+
+        writer.add_scalar('train/loss', ddsp_loss, step)
         writer.add_scalar('train/sc_loss', sc_loss, step)
         writer.add_scalar('train/mag_loss', mag_loss, step)
-
-        writer.add_scalar('train/DFloss', DFloss, step)
-        writer.add_scalar('train/DTloss', DTloss, step)
-        writer.add_scalar('train/G_ganloss', G_ganloss, step)
-
-        writer.add_scalar('trainD/mrdTL', mrdTL, step)
-        writer.add_scalar('trainD/mrdFL', mrdFL, step)
-        writer.add_scalar('trainD/mpdTL', mpdTL, step)
-
-        writer.add_scalar('trainD/mpdFL', mpdFL, step)
-        writer.add_scalar('trainD/GmrdL', GmrdL, step)
-        writer.add_scalar('trainD/GmpdL', GmpdL, step)
-
-
-
         writer.add_scalar('train/grad_norm', self.grad_norm, step)
         writer.add_scalar('train/lr', self.lrc, step)
         writer.flush()
@@ -438,8 +407,6 @@ class PL_diffwav(pl.LightningModule):
 
 
 
-
-
         writer.add_scalar('val/loss', lossss, self.global_step)
         writer.add_scalar('val/sc_loss', lossss1, self.global_step)
         writer.add_scalar('val/mag_loss', lossss2, self.global_step)
@@ -469,7 +436,7 @@ class PL_diffwav(pl.LightningModule):
 
         accc = {
             'audio': batch[0],
-            'spectrogram': batch[1]
+            'spectrogram': batch[1],'f0': batch[2],'uv': batch[3],
         }
 
         # self.valc=accc
@@ -480,14 +447,15 @@ class PL_diffwav(pl.LightningModule):
         device = audio.device
 
         b, c, t = spectrogram.size()
-        with torch.no_grad():
-            noist = torch.randn(b, 16, t * 512, device=device).type_as(audio)
-            # noist=torch.randn(1,8,t*512)
+        noist = torch.randn(b, 16, t * 512, device=device).type_as(audio)
+        # noist=torch.randn(1,8,t*512)
 
-            aaac=self(noist,spectrogram)[0]
-            loss1,loxs2=self.lossx.stft_loss(aaac, audio)
-            # aaac, opo = self.predict(spectrogram,f0, fast_sampling=False)
-            loss = self.loss_fn(aaac, audio)
+        aaac,_,_=self(noist,spectrogram,batch[2])
+        aaac=aaac[0]
+
+        loss1,loxs2=self.lossx.stft_loss(aaac, audio)
+        # aaac, opo = self.predict(spectrogram,f0, fast_sampling=False)
+        loss = self.loss_fn(aaac, audio)
 
         accc['gad'] = aaac
         # print(loss)
@@ -512,28 +480,21 @@ if __name__ == "__main__":
     from lvc.dataset2 import from_path, from_gtzan
     from lvc.params import params
 
-    writer = SummaryWriter("./mdsr_1000sVG/", )
+    writer = SummaryWriter("./mdsr_1000sV/", )
 
     # torch.backends.cuda.matmul.allow_tf32 = True
     # torch.backends.cudnn.allow_tf32 = True
 
     # torch.backends.cudnn.benchmark = True
-    md = PL_diffwav(params)
+    args = utils.load_config('./configs/combsub.yaml')
+    md = PL_diffwav(params,args)
     tensorboard = pl_loggers.TensorBoardLogger(save_dir=r"lagegeFDbignet_1000")
     dataset = from_path([#'./testwav/',
                         r'K:\dataa\OpenSinger',
-        r'C:\Users\autumn\Desktop\poject_all\DiffSinger\data\raw\opencpop\segments\wavs'
-        ,r'C:\Users\autumn\Desktop\poject_all\vcoder\LVC_net\m4singer'
-        ,r'C:\Users\autumn\Desktop\poject_all\vcoder\LVC_net\DAta2',r'C:\Users\autumn\Desktop\poject_all\vcoder\LVC_net\Data3',#r'K:\[vctk_cut',
-        r'K:\[udata\tb',r'K:\[udata\cut'# r'K:\[udata\Xia_Voice_Bank_V301_Bundle', r'K:\[udata\鬼叫'
+      #  r'C:\Users\autumn\Desktop\poject_all\DiffSinger\data\raw\opencpop\segments\wavs'
     ], params)
-
-    # dataset = from_path([  # './testwav/',
-    #
-    #     r'./ttttttttttt'], params)
-
     # dataset= from_path(['./test/', ], params, ifv=True)
-    datasetv = from_path(['./test/',r'C:\Users\autumn\Desktop\poject_all\vcoder\LVC_net\test2','./test3' ], params, ifv=True)
+    datasetv = from_path(['./test/', ], params, ifv=True)
     # md = md.load_from_checkpoint('./mdscp/sample-mnist-epoch99-99-37500.ckpt', params=params)
 
     # del eee['diffwav.lvc_blocks.0.kernel_predictor.input_conv.0.weigh']
@@ -558,23 +519,21 @@ if __name__ == "__main__":
 
     # monitor = 'val/loss',
 
-    dirpath = './mdscpscxVGX',
+    dirpath = './mdscpscxV',
 
     filename = 'sample-mnist-epoch{epoch:02d}-{epoch}-{step}',
 
-    auto_insert_metric_name = False,every_n_epochs=1,
-        save_top_k = -1,#every_n_train_steps=7000
+    auto_insert_metric_name = False,every_n_epochs=2,save_top_k = -1
 
     )
-    aaaa=list(md.parameters())
     trainer = pl.Trainer(max_epochs=1950, logger=tensorboard, devices=-1, benchmark=True, num_sanity_val_steps=-1,
                         # val_check_interval=2000,
                          callbacks=[checkpoint_callback],  check_val_every_n_epoch=1,
-                         #val_check_interval=5000,
-                         precision='16'
+                         #val_check_interval=500,
+                         #precision=16
                           #resume_from_checkpoint='./bignet/default/version_25/checkpoints/epoch=134-step=1074397.ckpt'
                          )
     trainer.fit(model=md, train_dataloaders=dataset, val_dataloaders=datasetv,
-                ckpt_path=r'C:\Users\autumn\Desktop\poject_all\vcoder\LVC_net\mdscpscxVGX\sample-mnist-epoch27-27-287432.ckpt'
+                #ckpt_path=r'C:\Users\autumn\Desktop\poject_all\vcoder\LVC_net\mdscpscxV\sample-mnist-epoch03-3-15024.ckpt'
                 )
 

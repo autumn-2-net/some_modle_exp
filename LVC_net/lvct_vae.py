@@ -18,7 +18,7 @@ from tqdm import tqdm
 
 from model.discriminator import Discriminator
 from scheduler import V3LSGDRLR
-from SWN import SwitchNorm2d
+from SWN import SwitchNorm2d, SwitchNorm1d
 from T_lvc import LVCNetGenerator, ParallelWaveGANDiscriminator
 from losses import PWGLoss
 from lvc import tfff
@@ -64,14 +64,16 @@ class dres2dnlocke(nn.Module):
         self.incov=nn.Conv2d(1,dim*2,kernel_size=1)
         self.Glu=GLU(1)
         self.model=nn.ModuleList()
+        self.norm = nn.ModuleList()
         for i in range(lay):
             self.model.append(res2dlay(dim, 2 ** (i % Dcycle)))
+            self.norm.append(SwitchNorm2d(dim))
         self.outc=nn.Conv2d(dim,2,kernel_size=1)
 
     def forward(self,x:torch.Tensor): #b ct->bct
         x=self.Glu(self.incov(x.unsqueeze(1)))#b ct->b dim c t
-        for i in self.model:
-            x=x+i(x)
+        for i ,n in zip(self.model,self.norm):
+            x=x+n(i(x))
         return self.Glu(self.outc(x)).squeeze(1)#b dim c t->bct
 
 
@@ -101,14 +103,16 @@ class dres1dnlocke(nn.Module):
         # self.incov=nn.Conv1d(1,dim*2,kernel_size=1)
         self.Glu=GLU(1)
         self.model=nn.ModuleList()
+        self.norm = nn.ModuleList()
         for i in range(lay):
             self.model.append(res1dlay(dim, 2 ** (i % Dcycle)))
+            self.norm.append(SwitchNorm1d(dim))
         # self.outc=nn.Conv1d(dim,2,kernel_size=1)
 
     def forward(self,x:torch.Tensor): #b ct->bct
 
-        for i in self.model:
-            x=x+i(x)
+        for i, n in zip(self.model, self.norm):
+            x = x + n(i(x))
         return x
 
 
@@ -143,11 +147,11 @@ class encode(nn.Module):
 
         self.down3=downlay(96,128,downx=4)#64
         self.res1d3=dres1dnlocke(64,Dcycle=4,lay=4)
-        self.res2d3=dres2dnlocke(12,Dcycle=2,lay=4)
+        self.res2d3=dres2dnlocke(8,Dcycle=2,lay=4)
 
         self.down4=downlay(128,256,downx=4)#256
         self.res1d4=dres1dnlocke(128,Dcycle=2,lay=4)
-        self.res2d4=dres2dnlocke(32,Dcycle=2,lay=4)
+        self.res2d4=dres2dnlocke(16,Dcycle=2,lay=4)
 
         # self.down5 = downlay(256, 256, downx=2)#512
         # self.res1d5 = dres1dnlocke(128, Dcycle=3, lay=6)
@@ -675,7 +679,7 @@ if __name__ == "__main__":
                         r'K:\dataa\OpenSinger',
         r'C:\Users\autumn\Desktop\poject_all\DiffSinger\data\raw\opencpop\segments\wavs'
         ,r'C:\Users\autumn\Desktop\poject_all\vcoder\LVC_net\m4singer'
-        ,r'C:\Users\autumn\Desktop\poject_all\vcoder\LVC_net\DAta2',r'C:\Users\autumn\Desktop\poject_all\vcoder\LVC_net\Data3'], params)
+        ,r'C:\Users\autumn\Desktop\poject_all\vcoder\LVC_net\DAta2',r'C:\Users\autumn\Desktop\poject_all\vcoder\LVC_net\Data3', r'K:\[udata\tb',r'K:\[udata\cut'], params)
 
     # dataset = from_path([  # './testwav/',
     #
@@ -715,7 +719,7 @@ if __name__ == "__main__":
 
     )
     aaaa=list(md.parameters())
-    trainer = pl.Trainer(max_epochs=1950, logger=tensorboard, devices=-1, benchmark=True, num_sanity_val_steps=-1,
+    trainer = pl.Trainer(max_epochs=1950, logger=tensorboard, devices=-1, benchmark=True, num_sanity_val_steps=10,
                         # val_check_interval=2000,
                          callbacks=[checkpoint_callback],  check_val_every_n_epoch=1,
                          #val_check_interval=500,
@@ -723,6 +727,6 @@ if __name__ == "__main__":
                           #resume_from_checkpoint='./bignet/default/version_25/checkpoints/epoch=134-step=1074397.ckpt'
                          )
     trainer.fit(model=md, train_dataloaders=dataset, val_dataloaders=datasetv,
-                # ckpt_path=r'C:\Users\autumn\Desktop\poject_all\vcoder\LVC_net\mdscpscxVGX\sample-mnist-epoch23-23-242244.ckpt'
+                ckpt_path=r'C:\Users\autumn\Desktop\poject_all\vcoder\LVC_net\mdscpscxVGXvaeF\sample-mnist-epoch11-11-68892.ckpt'
                 )
 
