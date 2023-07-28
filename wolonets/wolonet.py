@@ -16,114 +16,27 @@ from torch.optim.lr_scheduler import MultiStepLR
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
+from wolo_att import wolonet
 from model.discriminator import Discriminator
-from scheduler import V3LSGDRLR
-from SWN import SwitchNorm2d
-from T_lvc import LVCNetGenerator, ParallelWaveGANDiscriminator
+# from scheduler import V3LSGDRLR
+# from SWN import SwitchNorm2d, SwitchNorm1d
+# from T_lvc import LVCNetGenerator, ParallelWaveGANDiscriminator
 from losses import PWGLoss
-from lvc import tfff
+from wolonet import tfff
+from T_lvc import ParallelWaveGANDiscriminator
+
 
 # tensorboard = pl_loggers.TensorBoardLogger(save_dir="")
 # from fd.modules import DiffusionDBlock, TimeAware_LVCBlock
 # from fd.sc import V3LSGDRLR
 
-class Upcon(nn.Module):
-
-    def __init__(self):
-        super().__init__()
-        self.UP = torch.nn.ConvTranspose2d(1, 4, [3, 32], stride=[1, 2], padding=[1, 15])
-        self.c1 = torch.nn.Conv2d(4, 4, 3,  padding=1)
-        self.c2 = torch.nn.Conv2d(4, 4, 5,  padding=2)
-        self.cc2 = torch.nn.Conv2d(4, 4, 7, padding=3)
-        self.ccc2 = torch.nn.Conv2d(4, 4, 9, padding=4)
-        self.c3 = torch.nn.Conv2d(4, 1,kernel_size=1)
-
-    def forward(self, x):
-        x = torch.unsqueeze(x, 1)
-        x = self.UP(x)
-        x = F.leaky_relu(x, 0.4)
-        x=F.leaky_relu(self.c1(x), 0.4)+x
-        x = F.leaky_relu(self.c2(x), 0.4) + x
-        x = F.leaky_relu(self.cc2(x), 0.4) + x
-        x = F.leaky_relu(self.ccc2(x), 0.4) + x
-        x = F.leaky_relu(self.c3(x), 0.4)
-
-        # x = self.conv2(x)
-        # x = F.leaky_relu(x, 0.4)
-        spectrogram = torch.squeeze(x, 1)
-        return spectrogram
-class GLU(nn.Module):
-    def __init__(self, dim):
-        super().__init__()
-        self.dim = dim
-
-    def forward(self, x):
-        out, gate = x.chunk(2, dim=self.dim)
-        return out * gate.sigmoid()
-
-class covD(nn.Module):
-    def __init__(self,C,D):
-        super().__init__()
-        self.Glu=GLU(1)
-        self.n1=SwitchNorm2d(C)
-        self.n2 = SwitchNorm2d(C)
-        self.n3 = SwitchNorm2d(C)
-        self.n4 = SwitchNorm2d(C)
-
-        self.C1=nn.Conv2d(C,C*2,kernel_size=3,padding=(3 + 2 * (D - 1)) // 2,dilation=D)
-        self.C2 = nn.Conv2d(C, C * 2, kernel_size=5, padding=(5 + 4 * (D - 1)) // 2, dilation=D)
-        self.C3 = nn.Conv2d(C, C * 2, kernel_size=7, padding=(7 + 6 * (D - 1)) // 2, dilation=D)
-        self.C4 = nn.Conv2d(C, C * 2, kernel_size=9, padding=(9 + 8 * (D - 1)) // 2, dilation=D)
-    def forward(self, x):
-        x=x+self.n1(self.Glu(self.C1(x)))
-        x = x + self.n2(self.Glu(self.C2(x)))
-        # x = x + self.n3 (self.Glu(self.C3(x)))
-        # x = x + self.n4(self.Glu(self.C4(x)))
-        return x
-
-class UpconD(nn.Module):
-
-    def __init__(self):
-        super().__init__()
-        self.c1 = torch.nn.Conv2d(1, 8, kernel_size=1)
-        self.UP = torch.nn.ConvTranspose2d(4, 8, [3, 32], stride=[1, 2], padding=[1, 15])
-        self.Glu = GLU(1)
-        self.c3 = torch.nn.Conv2d(4, 2, kernel_size=1)
-
-        # self.Modl = []
-        # self.net=nn.Sequential()
-        self.Modl = []
-
-        for i in range(3):
-            self.Modl.append(covD(4, 2 ** (i % 3)))
-        self.net = nn.Sequential(*self.Modl)
-
-        self.Modl = []
-
-        for i in range(3):
-            self.Modl.append(covD(4, 2 ** (i % 3)))
-        self.net1 = nn.Sequential(*self.Modl)
 
 
-    def forward(self, x):
-        x = torch.unsqueeze(x, 1)
-        x=self.Glu (self.c1(x))
-        # x=self.net(x)
 
-        x = self.Glu (self.UP(x))
-        x = self.net1(x)
-        x =self.Glu(self.c3(x))
-        # x = F.leaky_relu(x, 0.4)
-        # x=F.leaky_relu(self.c1(x), 0.4)+x
-        # x = F.leaky_relu(self.c2(x), 0.4) + x
-        # x = F.leaky_relu(self.cc2(x), 0.4) + x
-        # x = F.leaky_relu(self.ccc2(x), 0.4) + x
-        # x = F.leaky_relu(self.c3(x), 0.4)
 
-        # x = self.conv2(x)
-        # x = F.leaky_relu(x, 0.4)
-        spectrogram = torch.squeeze(x, 1)
-        return spectrogram
+
+
+
 
 
 
@@ -131,19 +44,12 @@ class PL_diffwav(pl.LightningModule):
     def __init__(self, params):
         super().__init__()
         self.params = params
-        self.diffwav = LVCNetGenerator(in_channels=16,
-                 out_channels=1,
-                 inner_channels=18,#不知道10压不压住 441
-                 cond_channels=128,
-                 cond_hop_length=256,
-                 lvc_block_nums=3,#这个有点问题
-                 lvc_layers_each_block=10, #这个不能动
-                 lvc_kernel_size=9,# 9或者7较好
-                 kpnet_hidden_channels=96,
-                 kpnet_conv_size=3,
-                 dropout=0.0,)
+        self.diffwav = wolonet()
         self.D=ParallelWaveGANDiscriminator()
-        self.D2=Discriminator()
+        # self.D2=Discriminator(mrd_resolutions=[(1024, 120, 600), (2048, 240, 1200), (512, 50, 240), (4096, 128, 4096)])
+        self.D2 = Discriminator(
+            mrd_resolutions=[(1024, 120, 600), (2048, 240, 1200), (512, 50, 240), ])
+
 
         # self.model_dir = model_dir
         # self.model = model
@@ -162,7 +68,7 @@ class PL_diffwav(pl.LightningModule):
 
 
 
-        self.UP=UpconD()
+
 
         # self.loss_fn = nn.MSELoss()
         self.loss_fn = nn.L1Loss()
@@ -177,16 +83,14 @@ class PL_diffwav(pl.LightningModule):
         self.automatic_optimization = False
         self.sidx=0
 
-    def forward(self, audio, spectrogram):
-
-        spectrogram = self.UP(spectrogram)
+    def forward(self, spectrogram):
 
         # x = self.conv2(x)
         # x = F.leaky_relu(x, 0.4)
 
 
 
-        return self.diffwav(audio,spectrogram)
+        return self.diffwav(spectrogram)
 
     def on_before_zero_grad(self, optimizer):
         # print(optimizer.state_dict()['param_groups'][0]['lr'],self.global_step)
@@ -216,12 +120,12 @@ class PL_diffwav(pl.LightningModule):
 
         audio = accc['audio'].unsqueeze(1)
         spectrogram = accc['spectrogram']
-        device = audio.device
+        # device = audio.device
 
-        b, c, t = spectrogram.size()
-        noist = torch.randn(b, 16, t * 512,device=device).type_as(audio)
+        # b, c, t = spectrogram.size()
+        # noist = torch.randn(b, 16, t * 512,device=device).type_as(audio)
 
-        aaac = self(noist, spectrogram)
+        aaac = self(spectrogram)
         ####################
         #T D
         ####################
@@ -306,7 +210,7 @@ class PL_diffwav(pl.LightningModule):
             self._write_summary(self.global_step, accc, loss,aaac,loss1,loxs2,FFFL,TTTL,GDL,mrdTL,mrdFL,mpdTL,mpdFL,GmrdL,GmpdL)
         # self._write_summary(self.global_step, accc, loss, aaac, loss1, loxs2, FFFL, TTTL, GDL)
 
-        loss=((loss1+loxs2+loss)*2+GDL*1+mixgl)/4
+        loss=((loss1+loxs2+loss)*100+GDL*1+mixgl)/100
 
         opt_g.zero_grad()
 
@@ -322,7 +226,7 @@ class PL_diffwav(pl.LightningModule):
 
     def configure_optimizers(self):
         # optimizer = torch.optim.AdamW(self.parameters(), lr=self.params.learning_rate)
-        opt_g = torch.optim.AdamW((list(self.diffwav.parameters())+list(self.UP.parameters())), lr=self.params.learning_rate)
+        opt_g = torch.optim.AdamW((list(self.diffwav.parameters())), lr=self.params.learning_rate)
         opt_d = torch.optim.AdamW((list(self.D.parameters())+list(self.D2.parameters())), lr=self.params.learning_rate)
         # lt = {
         #     "scheduler": V3LSGDRLR(optimizer,),  # 调度器
@@ -438,8 +342,6 @@ class PL_diffwav(pl.LightningModule):
 
 
 
-
-
         writer.add_scalar('val/loss', lossss, self.global_step)
         writer.add_scalar('val/sc_loss', lossss1, self.global_step)
         writer.add_scalar('val/mag_loss', lossss2, self.global_step)
@@ -481,10 +383,10 @@ class PL_diffwav(pl.LightningModule):
 
         b, c, t = spectrogram.size()
         with torch.no_grad():
-            noist = torch.randn(b, 16, t * 512, device=device).type_as(audio)
+            # noist = torch.randn(b, 16, t * 512, device=device).type_as(audio)
             # noist=torch.randn(1,8,t*512)
 
-            aaac=self(noist,spectrogram)[0]
+            aaac=self(spectrogram)[0]
             loss1,loxs2=self.lossx.stft_loss(aaac, audio)
             # aaac, opo = self.predict(spectrogram,f0, fast_sampling=False)
             loss = self.loss_fn(aaac, audio)
@@ -509,10 +411,10 @@ class PL_diffwav(pl.LightningModule):
 
 
 if __name__ == "__main__":
-    from lvc.dataset2 import from_path, from_gtzan
-    from lvc.params import params
+    from wolonet.dataset2 import from_path, from_gtzan
+    from wolonet.params import params
 
-    writer = SummaryWriter("./mdsr_1000sVG/", )
+    writer = SummaryWriter("./mdsr_1000sVGvae/", )
 
     # torch.backends.cuda.matmul.allow_tf32 = True
     # torch.backends.cudnn.allow_tf32 = True
@@ -524,16 +426,14 @@ if __name__ == "__main__":
                         r'K:\dataa\OpenSinger',
         r'C:\Users\autumn\Desktop\poject_all\DiffSinger\data\raw\opencpop\segments\wavs'
         ,r'C:\Users\autumn\Desktop\poject_all\vcoder\LVC_net\m4singer'
-        ,r'C:\Users\autumn\Desktop\poject_all\vcoder\LVC_net\DAta2',r'C:\Users\autumn\Desktop\poject_all\vcoder\LVC_net\Data3',#r'K:\[vctk_cut',
-        r'K:\[udata\tb',r'K:\[udata\cut'# r'K:\[udata\Xia_Voice_Bank_V301_Bundle', r'K:\[udata\鬼叫'
-    ], params)
+        ,r'C:\Users\autumn\Desktop\poject_all\vcoder\LVC_net\DAta2',r'C:\Users\autumn\Desktop\poject_all\vcoder\LVC_net\Data3', r'K:\[udata\tb',r'K:\[udata\cut'], params)
 
     # dataset = from_path([  # './testwav/',
     #
     #     r'./ttttttttttt'], params)
 
     # dataset= from_path(['./test/', ], params, ifv=True)
-    datasetv = from_path(['./test/',r'C:\Users\autumn\Desktop\poject_all\vcoder\LVC_net\test2','./test3' ], params, ifv=True)
+    datasetv = from_path([r'C:\Users\autumn\Desktop\poject_all\vcoder\LVC_net\test/',r'C:\Users\autumn\Desktop\poject_all\vcoder\LVC_net\test2',r'C:\Users\autumn\Desktop\poject_all\vcoder\LVC_net\test3' ], params, ifv=True)
     # md = md.load_from_checkpoint('./mdscp/sample-mnist-epoch99-99-37500.ckpt', params=params)
 
     # del eee['diffwav.lvc_blocks.0.kernel_predictor.input_conv.0.weigh']
@@ -558,23 +458,22 @@ if __name__ == "__main__":
 
     # monitor = 'val/loss',
 
-    dirpath = './mdscpscxVGX',
+    dirpath = './wolonetlog',
 
-    filename = 'sample-mnist-epoch{epoch:02d}-{epoch}-{step}',
+    filename = 'wolo-model-epoch{epoch:02d}-{epoch}-{step}',
 
-    auto_insert_metric_name = False,every_n_epochs=1,
-        save_top_k = -1,#every_n_train_steps=7000
+    auto_insert_metric_name = False,every_n_epochs=2,save_top_k = -1
 
     )
     aaaa=list(md.parameters())
     trainer = pl.Trainer(max_epochs=1950, logger=tensorboard, devices=-1, benchmark=True, num_sanity_val_steps=10,
                         # val_check_interval=2000,
                          callbacks=[checkpoint_callback],  check_val_every_n_epoch=1,
-                         #val_check_interval=5000,
-                         precision='16'
+                         #val_check_interval=500,
+                         precision=16
                           #resume_from_checkpoint='./bignet/default/version_25/checkpoints/epoch=134-step=1074397.ckpt'
                          )
     trainer.fit(model=md, train_dataloaders=dataset, val_dataloaders=datasetv,
-                ckpt_path=r'C:\Users\autumn\Desktop\poject_all\vcoder\LVC_net\mdscpscxVGX\sample-mnist-epoch30-30-328730.ckpt'
+                # ckpt_path=r'C:\Users\autumn\Desktop\poject_all\vcoder\LVC_net\mdscpscxVGXvaeF\sample-mnist-epoch11-11-68892.ckpt'
                 )
 
